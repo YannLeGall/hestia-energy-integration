@@ -4,34 +4,46 @@ import charte from './ui/hestia-charte.css';
 import energy from './energy.css';
 import './editor';
 
-/* Hestia Énergie's card (demo/maquette.html, 7 Nov. 2026): three reading levels.
-   1 · the tile: one sentence, one figure (card: tuile)
-   2 · the full card: the banner, « À savoir », the moment, the rubrics (card: complete, by default)
-   3 · the detail cards, over the page from a rubric or alone (card: chauffage | veille | contrat | soleil | eau | appareils | pointe)
-   Every figure and every sentence comes from the integration (hestia_energy/view): the card computes nothing. */
+/* Hestia Énergie's card, after the cards' mock-up 2 (docs/maquette-cartes-2.html, validated by Frank on 8 Nov. 2026):
+   1 · the tile: « Énergie · en ce moment », one sentence, one figure (card: tuile)
+   2 · the full card: the banner, then one period per section (En ce moment · Aujourd'hui · Ce mois-ci), then « En détail »
+       (card: complete, by default)
+   3 · the detail cards, over the page from « En détail » or alone (card: soleil | chauffage | veille | eau | appareils |
+       pointe | contrat): the answer header (SUBJECT · period / the answer with its figure in bold / why), one period
+       per card, then the panels (a title in plain words, a sentence with a figure, a drawing).
+   Every figure comes from the integration (hestia_energy/view): the card only puts it into words. */
 
 type Hass={callWS:<T>(msg:Record<string,unknown>)=>Promise<T>;states:Record<string,{last_updated:string}>};
 type Banner={id:string;couleur:string;pastille:string;titre:string;pourquoi:string};
 type Period={euros:number|null;euros_energie:number|null;kwh_achetes:number;soleil_kwh:number|null;revendu_kwh:number|null;revendu_euros:number|null;soleil_couvre:number|null;soleil_garde:number|null;heures_inconnues:number;debut:string};
 type Hour={h:number;achat:number|null;soleil:number|null;revente:number|null};
-type View={pret:boolean;palier:number;equipement:{direct?:boolean;soleil?:boolean;appareils?:boolean};
- direct?:{achat_w:number|null;revente_w:number|null;soleil_w:number|null;maison_w:number|null;periode:string|null;prix:number|null;
-  prochain_changement:{a:string;periode:string}|null;en_marche:{nom:string;type:string;w:number}[];bandeau:Banner;fuite:{minutes:number|null;debit:number};
-  chauffage?:{pieces:{nom:string;w:number|null}[];w:number|null;euros_de_l_heure:number|null;sans_puissance:string[];poele:boolean}|null;
-  sources:Record<string,{retenu:string|null;valeur:number|null;ecartes:{source:string;raison:string}[]}>};
- jour?:Period;hier?:Period;mois?:Period;mois_an_dernier?:Period;projection:number|null;
- veille:{w:number;euros_par_an:number|null;nuits:number}|null;veille_historique:{jour:string;w:number}[];
- heures_creuses:[string,string][]|null;contrat:{option:string;kva:number;prix:Record<string,number>;revente:number|null};
- heures:{aujourdhui:Hour[];hier:Hour[]};eau:{jour_l:number;mois_l:number;mois_euros:number|null;prix_m3:number|null}|null;
- a_savoir:{rubrique:string;titre:string;texte:string}[];
- jusqu_ici?:{euros:number|null;kwh:number;hier_euros:number|null;hier_kwh:number;jusqu_a:string}|null;
- panneaux?:{hier:{nom:string;kwh:number}[];en_retrait:{nom:string;pourcent_de_moins:number}[];onduleur_muet_min:number|null}|null;
- chauffage?:{etat:string;mois?:Heat|null;hiver_dernier?:(Heat&{du:string;au:string})|null;poele?:Stove|null}};
-type Stove={mois:{kg:number;eur:number|null}|null;saison:{kg:number;eur:number|null};prix_kg:number|null;sac_kg:number|null};
+type Running={nom:string;type:string;w:number};
+type Direct={achat_w:number|null;revente_w:number|null;soleil_w:number|null;maison_w:number|null;periode:string|null;prix:number|null;
+ prochain_changement:{a:string;periode:string}|null;en_marche:Running[];bandeau:Banner;fuite:{minutes:number|null;debit:number};
+ chauffage?:{pieces:{nom:string;w:number|null}[];w:number|null;euros_de_l_heure:number|null;sans_puissance:string[];poele:boolean}|null};
 type Heat={kwh:number;eur:number|null;jours:number};
+type Stove={mois:{kg:number;eur:number|null}|null;saison:{kg:number;eur:number|null};prix_kg:number|null;sac_kg:number|null;stock_kg?:number|null;jours_restants?:number|null};
+type View={pret:boolean;palier:number;equipement:{direct?:boolean;soleil?:boolean;appareils?:boolean};direct?:Direct;
+ jour?:Period;hier?:Period;mois?:Period;mois_an_dernier?:Period;projection:number|null;
+ jusqu_ici?:{euros:number|null;kwh:number;hier_euros:number|null;hier_kwh:number;jusqu_a:string}|null;
+ veille:{w:number;euros_par_an:number|null;nuits:number;
+  nuit?:{appareils:{nom:string;w:number;euros_par_an:number|null}[];mesure_w:number;sans_prise_w:number|null;sans_prise_euros_par_an:number|null}|null;
+  evolution?:{debut_w:number;debut:string;ecart_w:number;ecart_euros_par_an:number|null}|null}|null;
+ veille_historique:{jour:string;w:number}[];
+ heures_creuses:[string,string][]|null;
+ contrat:{option:string;kva:number;prix:Record<string,number>;revente:number|null;prix_hp?:number|null;prix_hc?:number|null;prix_base?:number|null;
+  abonnement_mois?:number|null;part_hc?:number|null;base_euros?:number|null;seuil_hc?:number|null};
+ heures:{aujourdhui:Hour[];hier:Hour[]};
+ eau:{jour_l:number;mois_l:number;mois_euros:number|null;prix_m3:number|null;jours?:{jour:string;l:number|null}[];
+  plus_gros?:{jour:string;l:number;euros:number|null}|null;l_par_jour?:number|null;euros_100_l?:number|null}|null;
+ panneaux?:{hier:{nom:string;kwh:number}[];en_retrait:{nom:string;pourcent_de_moins:number}[];onduleur_muet_min:number|null}|null;
+ soleil_jour?:{plus_fort:{h:number;kwh:number}|null;prix_evite:number|null;groupes:{nom:string;kwh:number}[]};
+ appareils_jour?:{appareils:{nom:string;kwh:number;euros:number|null}[];mesure_kwh:number;maison_kwh:number;sans_prise_kwh:number|null;prix_moyen:number|null}|null;
+ pointe?:{h:number;kw:number;part:number|null}|null;
+ chauffage?:{etat:string;mois?:Heat|null;saison?:(Heat&{du:string})|null;euros_par_degre?:number|null;poele?:Stove|null}};
 type Config={type:string;card?:string;name?:string};
 
-const RUBRICS=['chauffage','veille','contrat','soleil','eau','appareils','pointe'] as const;
+const RUBRICS=['soleil','chauffage','veille','eau','appareils','pointe','contrat'] as const;
 type Rubric=typeof RUBRICS[number];
 
 /* Icons of the mock-up, drawn at the stroke (constants: never built from data). */
@@ -41,7 +53,6 @@ const I:Record<string,string>={
  grid:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"><path d="M8 21 11 3h2l3 18"/><path d="M5 7h14M6.5 12h11M9.5 16.5l5-4.5M14.5 16.5l-5-4.5"/></svg>',
  bolt:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M13 2.5 5 13.5h6l-1 8 8-11h-6z"/></svg>',
  drop:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M12 3s6.5 7 6.5 11.2A6.5 6.5 0 0 1 5.5 14.2C5.5 10 12 3 12 3z"/></svg>',
- euro:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M17.5 6.5a6.5 6.5 0 1 0 0 11"/><path d="M4.5 10.5h9M4.5 13.5h8"/></svg>',
  clock:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/></svg>',
  moon:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M19.5 14.5A8 8 0 0 1 9.5 4.5a8 8 0 1 0 10 10z"/></svg>',
  plug:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 3v5M15 3v5M6.5 8h11v3.5a5.5 5.5 0 0 1-11 0z"/><path d="M12 17v4"/></svg>',
@@ -51,37 +62,68 @@ const I:Record<string,string>={
 };
 const icon=(k:string)=>unsafeHTML(I[k]??I.bolt);
 
-/* Numbers in the family's words (PHRASES.md rule 7): kW to 0.1, € to the cent under 10 €, to the euro above. */
-// « always »: French leaves 4-digit numbers ungrouped by default (« 1749 »); the family reads « 1 749 ».
-const num=(v:number,d=1)=>v.toLocaleString('fr-FR',{maximumFractionDigits:d,minimumFractionDigits:0,useGrouping:'always' as unknown as boolean});
+/* Numbers in the family's words (PHRASES.md rule 7, C10): kW and kWh to 0.1, € to the cent under 10 €, to the euro
+   above and for a yearly amount (to ten euros from 100 €: « environ 330 € par an »). */
+// Grouped by hand: French leaves 4-digit numbers ungrouped (« 1749 ») and not every browser knows useGrouping « always »;
+// the family reads « 1 749 ».
+const num=(v:number,d=1)=>{const t=v.toLocaleString('fr-FR',{maximumFractionDigits:d,minimumFractionDigits:0,useGrouping:false});
+ const [i,f]=t.split(',');return i.replace(/\B(?=(\d{3})+(?!\d))/g,'\u202f')+(f?','+f:'');};
+const cents=(v:number)=>v.toLocaleString('fr-FR',{minimumFractionDigits:2,maximumFractionDigits:2});
 const kw=(w:number|null|undefined)=>w==null?'—':num(w/1000,1);
-const eur=(v:number|null|undefined)=>v==null?'—':Math.abs(v)<10?v.toLocaleString('fr-FR',{minimumFractionDigits:2,maximumFractionDigits:2}):num(v,0);
-const kwh=(v:number|null|undefined)=>v==null?'—':num(v,v<10?1:0);
+const eur=(v:number|null|undefined)=>v==null?'—':Math.abs(v)<10?cents(v):num(v,0);
+const bill=(v:number|null|undefined)=>v==null?'—':cents(v);          // a bill so far, to the cent (the mock-up's 29,89 €)
+const year=(v:number|null|undefined)=>v==null?'—':num(Math.abs(v)>=100?Math.round(v/10)*10:Math.round(v),0);
+const kwh=(v:number|null|undefined)=>v==null?'—':num(v,Math.abs(v)<20?1:0);
+const price=(v:number|null|undefined)=>v==null?'—':cents(v);          // a price a kWh: always to the cent (0,21 €)
 const MONTHS=['janvier','février','mars','avril','mai','juin','juillet','août','septembre','octobre','novembre','décembre'];
+const SHORT=['janv.','févr.','mars','avr.','mai','juin','juil.','août','sept.','oct.','nov.','déc.'];
 const LEVEL:Record<string,string>={bleu:'ok',vert:'benefit',orange:'action',rouge:'urgent'};
 const TONE:Record<string,string>={bleu:'--nw-ok',vert:'--nw-benefit',orange:'--nw-act',rouge:'--nw-alert'};
 const BANNER_ICON:Record<string,string>={fuite_eau:'drop',disjoncteur:'bolt',chauffe_eau_reseau:'drop',soleil_en_trop:'sun',soleil_machine_ok:'sun',
  soleil_chaleur:'sun',machines_ensemble:'plug',machine_sans_soleil:'sun',machine_heures_pleines:'clock',oublie:'plug',rien_hc:'clock',rien_hc_bientot:'clock',
  rien_soleil_juste:'sun',rien_soleil_petit:'sun',rien_soleil_plus_tard:'sun',rien:'home'};
+/** An hour said as a clock: « 11 h », « midi », « minuit ». */
+const hour=(h:number)=>h===12?'midi':h===0||h===24?'minuit':`${h} h`;
+/** An hour of the contract (« 0 h 14 ») kept on one line. */
+const nb=(t:string)=>t.replace(/ /g,' ');
+const clock=(d:Date)=>d.getHours()+' h '+String(d.getMinutes()).padStart(2,'0');
+const noon=(iso:string)=>new Date(iso+'T12:00:00');
+const dayOf=(iso:string)=>{const d=noon(iso).getDate();return d===1?'1er':String(d);};
+const dayMonth=(iso:string)=>`${dayOf(iso)} ${MONTHS[noon(iso).getMonth()]}`;
+/** A share in words (« un quart », « la moitié »), for the peak and the off-peak saving. */
+const part=(x:number)=>x<=.3?'un quart':x<=.4?'un tiers':x<=.58?'la moitié':x<=.7?'deux tiers':x<=.85?'trois quarts':'presque tout';
+/** The off-peak ranges in minutes of the day, from « 0 h 14 » – « 8 h 19 ». */
+const minutes=(t:string)=>{const m=t.match(/(\d+) h(?: (\d+))?/);return m?Number(m[1])*60+(m[2]?Number(m[2]):0):0;};
+function offpeak(ranges:[string,string][]|null):[number,number][]{
+ return (ranges??[]).flatMap(([a,b])=>{const x=minutes(a),y=minutes(b);return y>x?[[x,y] as [number,number]]:[[x,1440] as [number,number],[0,y] as [number,number]];});
+}
+/** All off-peak hours at night (between 20 h and 9 h 30): then « la nuit » says it; else « en heures creuses ». */
+const atNight=(r:[number,number][])=>r.length>0&&r.every(([a,b])=>(a>=20*60||b<=9*60+30));
 
-/* Bars of the mock-up: a colour per bar, background bands (off-peak hours), the highest value set on it. Numbers only. */
-function bars(vals:(number|null)[],o:{color?:(i:number)=>string;bands?:[number,number][];ticks?:[number,string][];h?:number;unit?:string;W?:number}={}):TemplateResult{
- const v=vals.map(x=>x??0),n=v.length||1,W=o.W??300,h=o.h??70,gap=n>20?1.2:3,bw=(W-gap*(n-1))/n,top=Math.max(...v,0),max=top*1.12||1;
- let s=`<svg class="chart" viewBox="0 -16 ${W} ${h+32}" role="img">`;
- (o.bands??[]).forEach(([a,b])=>{s+=`<rect x="${a*(bw+gap)-gap/2}" y="0" width="${(b-a)*(bw+gap)}" height="${h}" rx="3" style="fill:var(--nw-cold);fill-opacity:.16"/>`;});
- v.forEach((x,i)=>{const bh=Math.max(1.5,x/max*h);s+=`<rect x="${i*(bw+gap)}" y="${h-bh}" width="${bw}" height="${bh}" rx="${Math.min(3,bw/2)}" fill="${(o.color??(()=>'var(--nw-home)'))(i)}"${vals[i]==null?' opacity=".25"':''}/>`;});
- if(top>0){const m=v.indexOf(top),x=Math.min(W-26,Math.max(26,m*(bw+gap)+bw/2)),y=h-top/max*h,txt=num(top,1)+(o.unit??''),w=txt.length*5.6+12;
-  s+=`<g font-size="10" font-weight="700" text-anchor="middle"><rect x="${x-w/2}" y="${y-18}" width="${w}" height="14" rx="7" fill="var(--nw-bg)" stroke="var(--nw-line)"/><text x="${x}" y="${y-8}" fill="var(--nw-fg)">${txt}</text></g>`;}
- s+=`<g font-size="9.5" fill="var(--nw-fg2)">`+(o.ticks??[]).map(([i,l])=>{const x=i*(bw+gap)+bw/2,a=i===0?'start':(i>=n-1?'end':'middle');return `<text x="${a==='start'?0:(a==='end'?W:x)}" y="${h+13}" text-anchor="${a}">${l}</text>`;}).join('')+'</g></svg>';
- return html`${unsafeHTML(s)}`;
+/* ── Small drawings of the mock-up, all in CSS ── */
+type Bar={n:string;v:number;txt:string;sub?:string;live?:string;dash?:boolean;muted?:boolean;soft?:boolean};
+/** Lying bars: a name, a bar, a value, a small grey value (the hand-made review's bars). */
+function hb(rows:Bar[],c:string):TemplateResult{
+ const top=Math.max(...rows.map(r=>r.v),0)||1;
+ return html`<div class="hb" style="--c:var(${c})">${rows.map(r=>html`<span class="n${r.muted?' muted':''}"><span>${r.n}</span>${r.live?html`<span class="live">${r.live}</span>`:nothing}</span>
+  <span class="t${r.dash?' dash':''}"><i class=${r.soft?'soft':''} style="width:${Math.max(1,r.v/top*100)}%"></i></span>
+  <span class="v${r.muted?' muted':''}">${r.txt}${r.sub?html`<small>${r.sub}</small>`:nothing}</span>`)}</div>`;
 }
-const H_TICKS:[number,string][]=[[0,'0 h'],[6,'6 h'],[12,'12 h'],[18,'18 h'],[23,'23 h']];
-/** The off-peak hours as hour bands, from « 0 h 14 » – « 8 h 19 ». */
-function offpeakBands(ranges:[string,string][]|null):[number,number][]{
- const h=(t:string)=>{const m=t.match(/(\d+) h(?: (\d+))?/);return m?Number(m[1])+(m[2]?Number(m[2])/60:0):0;};
- return (ranges??[]).flatMap(([a,b])=>{const x=h(a),y=h(b);return y>x?[[x,y] as [number,number]]:[[x,24] as [number,number],[0,y] as [number,number]];});
+/** C5: at most five lines (and those running now), then « Et N autres : X ». */
+function top5(rows:Bar[],fmt:(x:number)=>string):Bar[]{
+ const shown=rows.filter((r,i)=>i<5||r.live),rest=rows.filter(r=>!shown.includes(r));
+ if(rest.length<2)return rows;
+ const total=rest.reduce((s,r)=>s+r.v,0);
+ return [...shown,{n:`Et ${rest.length} autres`,v:total,txt:fmt(total),muted:true,soft:true}];
 }
-const share=(v:View)=>{const d=v.direct;return v.equipement.soleil&&d?.maison_w?Math.round(Math.min(1,(d.soleil_w??0)/d.maison_w)*100):null;};
+/** Standing bars: the highest carries its value; off-peak bands behind; a dashed limit. */
+function cols(vals:(number|null)[],c:string,o:{pin?:(v:number)=>string;part?:number;bands?:(i:number)=>boolean;max?:number;limit?:number;limitLabel?:string;tall?:boolean}={}):TemplateResult{
+ const top=Math.max(...vals.map(v=>v??0),0),max=o.max??(top*1.15||1),im=top>0?vals.indexOf(top):-1,n=vals.length;
+ return html`<div class="cols${o.tall?' tall':''}" style="--c:var(${c})">${vals.map((v,i)=>{const h=v==null?2:Math.max(2,v/max*100);
+  return html`<div class="c${o.bands?.(i)?' band':''}">${i===im&&o.pin?html`<span class="pin ${i<2?'l':i>n-3?'r':''}" style="bottom:${h}%">${o.pin(v!)}</span>`:nothing}<i class="${v==null?'none':''}${o.part===i?' part':''}" style="height:${h}%"></i></div>`;})}
+  ${o.limit?html`<div class="limit" style="bottom:${o.limit/max*100}%"><span>${o.limitLabel}</span></div>`:nothing}</div>`;
+}
+const H_TICKS=html`<div class="ticks"><span>0 h</span><span>6 h</span><span>12 h</span><span>18 h</span><span>24 h</span></div>`;
 
 class HestiaEnergyCard extends LitElement {
  static styles=[unsafeCSS(charte),unsafeCSS(energy)];
@@ -115,7 +157,7 @@ class HestiaEnergyCard extends LitElement {
  render(){
   const v=this._view;
   if(this._error&&!v)return html`<ha-card><div class="empty">${this._error}</div></ha-card>`;
-  if(!v||!v.pret)return html`<ha-card><div class="nw-say">Hestia Énergie lit la page Énergie…</div></ha-card>`;
+  if(!v||!v.pret)return html`<ha-card><div class="empty">Hestia Énergie lit la page Énergie…</div></ha-card>`;
   const card=this._config.card;
   if(card==='tuile')return this._tile(v);
   if(card!=='complete')return html`<ha-card>${this._detail(v,card as Rubric,false)}</ha-card>`;
@@ -124,189 +166,322 @@ class HestiaEnergyCard extends LitElement {
  }
 
  private _name(){return this._config.name??'Maison';}
- private _where(){const d=new Date();return d.toLocaleDateString('fr-FR',{weekday:'long'})+' '+d.getHours()+' h '+String(d.getMinutes()).padStart(2,'0');}
+ private _live(v:View){return !!(v.equipement.direct&&v.direct?.maison_w!=null);}
+ /** « en heures pleines » / « en heures creuses » / nothing on Base. */
+ private _when(d?:Direct){return d?.periode==='hc'?'en heures creuses':d?.periode==='hp'?'en heures pleines':'';}
+
+ /* What the home draws now, in one sentence (the tile, « En ce moment »). */
+ private _nowSay(v:View,withHome:boolean){
+  const d=v.direct!,home=d.maison_w??0,sun=Math.min(d.soleil_w??0,home),bought=d.achat_w??0,sold=d.revente_w??0;
+  const when=this._when(d),cost=d.prix!=null?html`<b>${eur(bought/1000*d.prix)} € de l'heure</b>${when?`, ${when}`:''}`:null;
+  const lead=withHome?html`La maison consomme <b>${kw(home)} kW</b>. `:nothing;
+  if(v.equipement.soleil&&sold>=30&&bought<30)return html`${lead}Le soleil couvre tout, et <b>${kw(sold)} kW</b> partent au réseau.`;
+  if(v.equipement.soleil&&sun>=30){
+   if(withHome)return html`${lead}Le soleil en couvre <b>${Math.round(sun/home*100)} %</b>, le reste vient du réseau${cost?html` : ${cost}`:''}.`;
+   return html`Le soleil en donne <b>${kw(sun)} kW</b> ; le reste vient du réseau${cost?html` : ${cost}`:''}.`;}
+  return cost?html`${lead}Tout vient du réseau : ${cost}.`:lead;
+ }
 
  /* ── 1 · The tile ── */
  private _tile(v:View){
-  const b=v.direct?.bandeau,d=v.direct,live=!!(v.equipement.direct&&d?.maison_w!=null),c=b?TONE[b.couleur]:'--nw-ok';
-  const value=live?kw(d!.maison_w):eur(v.hier?.euros??v.hier?.euros_energie);
-  const sub=!live?`${kwh(v.hier?.kwh_achetes)} kWh hier`:(v.equipement.soleil&&d!.soleil_w!=null?`dont ${kw(Math.min(d!.soleil_w,d!.maison_w??0))} kW de soleil`:(d!.prix!=null?`${eur((d!.maison_w??0)/1000*d!.prix)} € de l'heure`:''));
-  const p=share(v),say=b?(b.id.startsWith('rien')&&b.pourquoi?b.pourquoi:b.titre):'';
-  return html`<ha-card class="tile"><div class="t-top"><div style="min-width:0"><div class="nw-label">${live?'Énergie · maintenant':'Énergie · hier'}</div>
-    <div class="name">${this._name()}</div><div class="nw-say">${this._where()}</div></div>
-   <div class="t-right">${b?html`<span class="pastille" style="--c:var(${c})">${b.pastille}</span>`:nothing}<div class="t-val">${value}<small>${live?'kW':'€'}</small></div><div class="t-sub">${sub}</div></div>
-   ${p!=null?html`<span class="ring" style="--c:var(${c});--p:${p}" aria-label="${p} % de soleil">${icon('sun')}</span>`:nothing}</div>
-   ${say?html`<div class="bubble" style="--c:var(${c})">${icon(BANNER_ICON[b!.id]??'home')}<span>${say}</span></div>`:nothing}</ha-card>`;
+  const b=v.direct?.bandeau,c=b?TONE[b.couleur]??'--nw-ok':'--nw-ok',live=this._live(v);
+  const pill=b?html`<span class="pastille" style="--c:var(${c})">${b.pastille}</span>`:nothing;
+  if(live)return html`<ha-card class="tile"><div class="t-row"><span class="ico" style="--c:var(--nw-home)">${icon('home')}</span><span class="nw-label">Énergie · <i>en ce moment</i></span>${pill}</div>
+   <p class="ans-t">La maison consomme <b>${kw(v.direct!.maison_w)} kW</b></p><p class="ans-w">${this._nowSay(v,false)}</p></ha-card>`;
+  const y=v.hier;
+  return html`<ha-card class="tile"><div class="t-row"><span class="ico" style="--c:var(--nw-home)">${icon('home')}</span><span class="nw-label">Énergie · <i>hier</i></span>${pill}</div>
+   <p class="ans-t">${y?.euros!=null?html`Hier, la maison a coûté <b>${eur(y.euros)} €</b>`:html`Hier, la maison a acheté <b>${kwh(y?.kwh_achetes)} kWh</b>`}</p>
+   <p class="ans-w">${y?.euros!=null?html`<b>${kwh(y.kwh_achetes)} kWh</b> achetés au réseau${y.soleil_couvre!=null?html` ; le soleil a couvert <b>${y.soleil_couvre} %</b> de la maison`:''}.`:'Le prix sera connu avec le contrat.'}</p></ha-card>`;
  }
 
  /* ── 2 · The full card ── */
  private _full(v:View){
-  const b=v.direct?.bandeau;
+  const b=v.direct?.bandeau,now=new Date();
+  const when=now.toLocaleDateString('fr-FR',{weekday:'long',day:'numeric',month:'long'})+' · '+clock(now);
+  const secs=[this._nowSection(v),this._todaySection(v),this._monthSection(v)].filter(s=>s!==nothing);
   return html`<ha-card>
-   <div class="head"><div><div class="nw-label">Synthèse</div><div class="name">${this._name()}</div></div><div class="where">${this._where()}</div></div>
+   <div class="head"><div style="min-width:0"><div class="nw-label">Énergie</div><div class="nw-title">${this._name()}</div></div><div class="when">${when}</div></div>
    ${b?html`<div class="nw-band nw-glass" data-level=${LEVEL[b.couleur]??'ok'}><div class="nw-band-row"><span class="nw-band-pic box">${icon(BANNER_ICON[b.id]??'home')}</span>
-    <div class="nw-band-text"><p class="nw-band-kicker">${b.titre.startsWith(b.pastille)?'Énergie · maintenant':b.pastille}</p><p class="nw-band-title">${b.titre}</p>${b.pourquoi?html`<p class="nw-band-line">${b.pourquoi}</p>`:nothing}</div></div></div>`:nothing}
-   ${v.a_savoir?.length?html`<div class="know">${v.a_savoir.map(k=>html`<div class="k"><span class="nw-label">${k.titre}</span><span>${k.texte}</span></div>`)}</div>`:nothing}
-   ${this._section('now',v.equipement.direct?'Maintenant':'Hier',this._nowSum(v),this._now(v))}
-   ${this._section('rubs','Rubriques','touchez pour tout voir',this._rubrics(v),'rubs')}
+    <div class="nw-band-text"><p class="nw-band-kicker">En ce moment</p><p class="nw-band-title">${b.titre}</p>${b.pourquoi||this._periodSay(v)?html`<p class="nw-band-line">${b.pourquoi||this._periodSay(v)}</p>`:nothing}</div></div></div>`:nothing}
+   <div class="periods${secs.length===2?' two':''}">${secs}</div>
+   ${this._section('more','En détail','touchez pour ouvrir',html`<div class="more">${this._goes(v)}</div>`)}
   </ha-card>`;
  }
- private _section(id:string,label:string,sum:string,body:unknown,cls='sec-body'){
+ /** « Heures pleines jusqu'à 0 h 14, puis heures creuses jusqu'à 8 h 19. »: under a banner that says nothing more. */
+ private _periodSay(v:View){
+  const d=v.direct,next=d?.prochain_changement;
+  if(!next||(d?.periode!=='hp'&&d?.periode!=='hc'))return '';
+  const at=new Date(next.a),now=d.periode==='hp'?'Heures pleines':'Heures creuses';
+  const start=at.getHours()*60+at.getMinutes(),range=(v.heures_creuses??[]).find(([a])=>minutes(a)===start);
+  const then=next.periode==='hc'&&range?`, puis heures creuses jusqu'à ${nb(range[1])}`:'';
+  return `${now} jusqu'à ${clock(at)}${then}.`;
+ }
+ private _section(id:string,title:string,sum:string,body:unknown){
   const open=!this._folded.has(id);
   return html`<div class="sec"><button class="nw-fold-head" aria-expanded=${String(open)} @click=${()=>{const f=new Set(this._folded);if(open)f.add(id);else f.delete(id);this._folded=f;}}>
-   <span class="nw-title">${label}</span><span class="nw-sum">${sum}</span><span class="nw-chevron">${icon('chev')}</span></button>${open?html`<div class=${cls}>${body}</div>`:nothing}</div>`;
- }
- private _nowSum(v:View){
-  const d=v.direct;
-  if(v.equipement.direct&&d?.maison_w!=null){const p=share(v);
-   return `${kw(d.maison_w)} kW`+(p!=null?` · ${p} % de soleil`:(d.prix!=null?` · ${eur(d.maison_w/1000*d.prix)} € de l'heure`:''));}
-  return `${kwh(v.hier?.kwh_achetes)} kWh · ${eur(v.hier?.euros)} €`;
- }
- private _panel(o:{t:string;ic:string;c?:string;src?:string;wide?:boolean;val?:string;unit?:string;say?:unknown;body?:unknown;foot?:unknown}){
-  const c=o.c??'--nw-home';
-  return html`<div class="nw-panel${o.wide?' wide':''}" style="--c:var(${c})"><div class="nw-panel-head"><span class="nw-panel-icon tint" style="--c:var(${c})">${icon(o.ic)}</span><h3><span>${o.t}</span></h3>${o.src?html`<span class="nw-badge">${o.src}</span>`:nothing}</div>
-   ${o.val!=null?html`<div class="nw-cases"><div class="nw-value"><b>${o.val}</b><span>${o.unit??''}</span></div></div>`:nothing}
-   ${o.say?html`<div class="m-say">${o.say}</div>`:nothing}${o.body??nothing}${o.foot?html`<div class="m-foot">${o.foot}</div>`:nothing}</div>`;
+   <span class="nw-title">${title}</span><span class="nw-sum">${sum}</span><span class="nw-chevron">${icon('chev')}</span></button>${open?body:nothing}</div>`;
  }
  private _flow(v:View){
   const d=v.direct!;const node=(ic:string,c:string,val:string,l:string)=>html`<div class="node" style="--c:var(${c})"><span class="dot">${icon(ic)}</span><span class="nv">${val}</span><span class="nl">${l}</span></div>`;
   const link=(c:string,state:string)=>html`<span class="link ${state}" style="--c:var(${c})"><i></i></span>`;
   const buying=(d.achat_w??0)>=30,selling=!buying&&(d.revente_w??0)>=30;
-  if(!v.equipement.soleil)return html`<div class="flow two">${node('home','--nw-home',`${kw(d.maison_w)} kW`,'Maison')}${link('--nw-grid','rev')}${node('grid','--nw-grid',`${kw(d.achat_w)} kW`,'Réseau')}</div>`;
-  return html`<div class="flow">${node('sun','--nw-sun',`${kw(d.soleil_w)} kW`,'Soleil')}${link('--nw-sun',(d.soleil_w??0)>=30?'':'off')}${node('home','--nw-home',`${kw(d.maison_w)} kW`,'Maison')}${link('--nw-grid',buying?'rev':selling?'':'off')}${node('grid','--nw-grid',`${kw(buying?d.achat_w:selling?d.revente_w:0)} kW`,selling?'Revendu':'Réseau')}</div>`;
+  if(!v.equipement.soleil)return html`<div class="flow two">${node('home','--nw-home',`${kw(d.maison_w)} kW`,'Maison')}${link('--nw-grid','rev')}${node('grid','--nw-grid',`${kw(d.achat_w)} kW`,'Réseau')}</div>`;
+  return html`<div class="flow">${node('sun','--nw-sun',`${kw(d.soleil_w)} kW`,'Soleil')}${link('--nw-sun',(d.soleil_w??0)>=30?'':'off')}${node('home','--nw-home',`${kw(d.maison_w)} kW`,'Maison')}${link('--nw-grid',buying?'rev':selling?'':'off')}${node('grid','--nw-grid',`${kw(buying?d.achat_w:selling?d.revente_w:0)} kW`,selling?'Revendu':'Réseau')}</div>`;
  }
- private _now(v:View){
-  const d=v.direct,m=v.mois,last=v.mois_an_dernier,now=new Date();
-  const lastFoot=last?html`<span>${MONTHS[now.getMonth()]} ${now.getFullYear()-1} : <b>${last.euros!=null?eur(last.euros)+' €':kwh(last.kwh_achetes)+' kWh'}</b>${last.euros!=null?'':' achetés'}</span>`:nothing;
-  const sf=v.jusqu_ici,hour=sf?new Date(sf.jusqu_a).getHours():0;
-  const euros=sf&&sf.euros!=null&&sf.hier_euros!=null,gap=sf?(euros?sf.euros!-sf.hier_euros!:sf.kwh-sf.hier_kwh):0,small=euros?Math.abs(gap)<0.1:Math.abs(gap)<0.5;
-  const todayPanel=sf?this._panel({t:'Aujourd\'hui',src:`jusqu'à ${hour} h`,ic:'clock',c:'--nw-ok',val:euros?eur(sf.euros):kwh(sf.kwh),unit:euros?'€':'kWh',
-   say:small?'Comme hier à la même heure.':`${euros?`${eur(Math.abs(gap))} €`:`${kwh(Math.abs(gap))} kWh`} de ${gap>0?'plus':'moins'} qu'hier à la même heure.`}):nothing;
-  const monthPanel=this._panel({t:v.equipement.soleil?'Ce mois, électricité':'Ce mois',src:'abonnement compris',ic:'euro',c:'--nw-ok',val:eur(m?.euros??m?.euros_energie),unit:'€ jusqu\'ici',
-   say:v.projection!=null?`Environ ${eur(v.projection)} € à la fin du mois.`:nothing,foot:lastFoot});
-  if(v.equipement.direct&&d?.maison_w!=null){
-   const p=share(v),sources=[...new Set([d.sources?.soleil?.retenu,d.sources?.achat?.retenu].filter(Boolean))].join(' · ');
-   const running=[...d.en_marche].sort((a,b)=>b.w-a.w).slice(0,3),h=d.chauffage;
-   // The heaters heating now, by their thermostat (9.5); the stove says it is lit, its pellets are not electricity.
-   const heatRows=[...(h?.poele?[html`<div class="row"><span>Poêle</span><span class="v muted">allumé</span></div>`]:[]),
-    ...(h?.pieces??[]).map(r=>html`<div class="row"><span>Chauffage · ${r.nom}</span><span class=${r.w==null?'v muted':'v'}>${r.w==null?'en marche':`${kw(r.w)} kW`}</span></div>`)];
-   return html`${this._panel({t:'En ce moment',src:sources,ic:v.equipement.soleil?'sun':'bolt',c:v.equipement.soleil?'--nw-sun':'--nw-grid',body:this._flow(v),
-     foot:html`${p!=null?html`<span>Le soleil couvre <b>${p} %</b> de la maison</span>`:html`<span>${d.periode==='hc'?'Heures creuses':'Heures pleines'}</span>`}${d.prix!=null&&(d.achat_w??0)>=30?html`<span><b>${eur((d.achat_w??0)/1000*d.prix)} €</b> de l'heure</span>`:nothing}`})}
-    ${this._panel({t:'En marche',src:'prises · pinces · thermostats',ic:'plug',body:running.length||heatRows.length?html`<div class="rows">${heatRows}${running.map(r=>html`<div class="row"><span>${r.nom}</span><span class="v">${kw(r.w)} kW</span></div>`)}</div>`:html`<div class="nw-say">Rien de gros ne tourne.</div>`,
-     foot:h?.euros_de_l_heure!=null&&h.w?html`<span>Chauffage : <b>${eur(h.euros_de_l_heure)} €</b> de l'heure</span>`:nothing})}
-    ${todayPanel}${monthPanel}`;
+ private _nowSection(v:View){
+  const d=v.direct;
+  if(!d)return nothing;
+  if(!this._live(v)){
+   // No live power (a Linky read the day after): the price of the moment still says something.
+   if(d.prix==null)return nothing;
+   const next=d.prochain_changement?` jusqu'à ${clock(new Date(d.prochain_changement.a))}`:'';
+   return this._section('now','En ce moment',this._when(d),html`<div class="lines"><div class="line"><span class="ico" style="--c:var(--nw-grid)">${icon('clock')}</span>
+    <span>Le kWh coûte <b>${price(d.prix)} €</b>${this._when(d)?` ${this._when(d)}`:''}${next}.</span></div></div>`);
   }
-  const hours=v.heures?.hier??[],bands=offpeakBands(v.heures_creuses);
-  return html`${this._panel({t:'Hier',src:'statistiques',ic:'bolt',val:eur(v.hier?.euros),unit:'€',body:html`${bars(hours.map(x=>x.achat),{bands,ticks:H_TICKS,color:i=>bands.some(([a,b])=>i>=a&&i<b)?'var(--nw-cold)':'var(--nw-home)'})}
-    <div class="nw-legend"><span><i style="--c:var(--nw-home)"></i>heures pleines</span><span><i style="--c:var(--nw-cold)"></i>heures creuses</span></div>`})}${monthPanel}`;
+  const heat=d.chauffage,running=[...d.en_marche].sort((a,b)=>b.w-a.w);
+  const chips=[...(heat?.poele?[html`<span class="chip">Poêle <b>allumé</b></span>`]:[]),
+   ...(heat?.pieces??[]).map(r=>html`<span class="chip">Chauffage ${r.nom}${r.w!=null?html` <b>${kw(r.w)} kW</b>`:nothing}</span>`),
+   ...running.slice(0,5).map(r=>html`<span class="chip">${r.nom} <b>${kw(r.w)} kW</b></span>`)];
+  return this._section('now','En ce moment',`${kw(d.maison_w)} kW pour toute la maison`,html`${this._flow(v)}
+   <div class="lines"><div class="line"><span class="ico" style="--c:var(--nw-home)">${icon('home')}</span><span>${this._nowSay(v,true)}</span></div>
+    ${chips.length?html`<div class="chips"><span class="nw-label">En marche</span>${chips}</div>`:nothing}</div>`);
+ }
+ private _todaySection(v:View){
+  const s=v.jusqu_ici;
+  if(s){
+   const h=new Date(s.jusqu_a).getHours(),euros=s.euros!=null&&s.hier_euros!=null;
+   const a=euros?s.euros!:s.kwh,b=euros?s.hier_euros!:s.hier_kwh,gap=a-b,small=euros?Math.abs(gap)<0.1:Math.abs(gap)<0.5;
+   const unit=euros?'€':'kWh',fmt=(x:number)=>euros?eur(x):kwh(x);
+   return this._section('today','Aujourd\'hui','depuis minuit',html`<div class="big"><b>${fmt(a)} ${unit}</b><span>${euros?'dépensés':'consommés'} depuis minuit</span></div>
+    <p class="say">${small?html`Comme hier à la même heure.`:html`<b>${fmt(Math.abs(gap))} ${unit} de ${gap>0?'plus':'moins'}</b> qu'hier à la même heure.`}</p>
+    ${hb([{n:'Aujourd\'hui',v:a,txt:`${fmt(a)} ${unit}`},{n:`Hier à ${hour(h)}`,v:b,txt:`${fmt(b)} ${unit}`,muted:true,soft:true}],'--nw-home')}`);
+  }
+  const y=v.hier;
+  if(!y||y.kwh_achetes<=0)return nothing;
+  // The statistics come the day after (HA Linky): yesterday, whole, is the latest day known.
+  return this._section('today','Hier','toute la journée',html`<div class="big"><b>${y.euros!=null?`${eur(y.euros)} €`:`${kwh(y.kwh_achetes)} kWh`}</b><span>${y.euros!=null?'pour toute la journée':'achetés au réseau'}</span></div>
+   ${y.euros!=null?html`<p class="say"><b>${kwh(y.kwh_achetes)} kWh</b> achetés au réseau${y.soleil_couvre!=null?html` ; le soleil a couvert <b>${y.soleil_couvre} %</b> de la maison`:''}.</p>`:nothing}`);
+ }
+ private _monthSection(v:View){
+  const m=v.mois;
+  if(!m)return nothing;
+  const now=new Date(),value=m.euros??m.euros_energie,last=v.mois_an_dernier,p=v.projection;
+  const lastSay=last?.euros!=null?` L'an dernier, ${MONTHS[now.getMonth()]} avait coûté ${eur(last.euros)} €.`:'';
+  return this._section('month','Ce mois-ci',`depuis le 1er ${MONTHS[now.getMonth()]}`,html`<div class="big"><b>${value!=null?`${bill(value)} €`:`${kwh(m.kwh_achetes)} kWh`}</b><span>${value==null?'achetés au réseau':m.euros!=null?'abonnement compris':'sans l\'abonnement'}</span></div>
+   ${p!=null?html`<p class="say">Au même rythme, <b>environ ${eur(p)} €</b> à la fin du mois.${lastSay}</p>
+    <div><div class="track" style="--c:var(--nw-ok)"><i style="width:${Math.min(100,(value??0)/p*100)}%"></i></div>
+     <div class="track-l"><span>déjà <b>${eur(value)} €</b></span><span>fin du mois <b>${eur(p)} €</b></span></div></div>`
+    :lastSay?html`<p class="say">${lastSay.trim()}</p>`:nothing}`);
  }
 
- /* Rubrics: one sentence, one figure; touched, they open their detail card. Only those the home can fill. */
- private _rubric(key:Rubric,ic:string,c:string,title:string,val:string,unit:string,say:string){
-  return html`<button class="rub" style="--c:var(${c})" @click=${()=>{this._open=key;}}><span class="r-h"><span class="nw-panel-icon tint" style="--c:var(${c})">${icon(ic)}</span><b>${title}</b><span class="r-go">›</span></span>
-   <span class="r-v">${val}<small>${unit}</small></span><span class="r-s">${say}</span></button>`;
+ /* « En détail »: each one says its subject AND its period, one value, one sentence; touched, it opens its card. */
+ private _go(key:Rubric,ic:string,c:string,label:string,val:string,unit:string,say:string){
+  return html`<button class="go" style="--c:var(${c})" @click=${()=>{this._open=key;}}><span class="g-h"><span class="ico">${icon(ic)}</span><span class="nw-label">${label}</span><span class="ar">›</span></span>
+   <span class="g-v">${val}<small>${unit}</small></span><span class="g-s">${say}</span></button>`;
  }
- private _rubrics(v:View){
-  const out:TemplateResult[]=[],d=v.direct;
-  if(v.equipement.soleil&&v.jour?.soleil_kwh!=null)out.push(this._rubric('soleil','sun','--nw-sun','Soleil',kwh(v.jour.soleil_kwh),'kWh aujourd\'hui',
-   v.hier?.soleil_garde!=null?`Hier, la maison a gardé ${v.hier.soleil_garde} % de son soleil.`:''));
-  const heat=v.chauffage,st=heat?.poele,el=heat?.etat==='pret'?heat.mois:null;
-  if(el&&st?.mois&&el.eur!=null&&st.mois.eur!=null)out.push(this._rubric('chauffage','flame','--nw-heat','Chauffage',eur(el.eur+st.mois.eur),'€ ce mois',`Radiateurs ${eur(el.eur)} €, poêle ${eur(st.mois.eur)} €.`));
-  else if(el)out.push(this._rubric('chauffage','flame','--nw-heat','Chauffage',el.eur!=null?eur(el.eur):kwh(el.kwh),el.eur!=null?'€ ce mois':'kWh ce mois',st?`Poêle : ${(st.mois??st.saison).eur!=null?`${eur((st.mois??st.saison).eur)} €`:`${num((st.mois??st.saison).kg,0)} kg`} ${st.mois?'ce mois':'depuis octobre'}.`:'Estimé d\'après le froid de chaque jour.'));
-  else if(st){const p=st.mois??st.saison,when=st.mois?'ce mois':'depuis octobre';
-   out.push(this._rubric('chauffage','flame','--nw-heat','Chauffage',p.eur!=null?eur(p.eur):num(p.kg,0),`${p.eur!=null?'€':'kg'} ${when}`,`Poêle : ${num(p.kg,0)} kg de granulés.`));}
-  else if(heat?.etat==='peu_lie')out.push(this._rubric('chauffage','flame','--nw-heat','Chauffage','—','','Vous chauffez sans doute surtout avec une autre énergie.'));
-  if(v.veille)out.push(this._rubric('veille','moon','--nw-watch','Veille de nuit',String(v.veille.w),'W',v.veille.euros_par_an!=null?`Environ ${eur(v.veille.euros_par_an)} € par an, sans rien allumer.`:''));
-  if(v.eau)out.push(this._rubric('eau','drop','--nw-water','Eau',num(v.eau.jour_l,0),'L aujourd\'hui',d?.fuite?.minutes?`L'eau coule depuis ${Math.round(d.fuite.minutes)} min.`:'Rien ne coule ; pas de fuite.'));
-  if(v.equipement.appareils&&d)out.push(this._rubric('appareils','plug','--nw-home','Appareils',String(d.en_marche.length),'en marche',d.en_marche.length?`${[...d.en_marche].sort((a,b)=>b.w-a.w)[0].nom} tire le plus.`:'Rien de gros ne tourne.'));
-  if(v.equipement.direct&&v.contrat?.kva)out.push(this._rubric('pointe','grid','--nw-grid','Pointe',kwh(Math.max(0,...(v.heures?.aujourdhui??[]).map(h=>h.achat??0))),'kWh dans l\'heure la plus chargée',`Aujourd'hui, sur ${v.contrat.kva} kVA souscrits.`));
-  out.push(this._rubric('contrat','doc','--nw-ok','Contrat',v.contrat?.option==='hphc'?'HP / HC':v.contrat?.option==='tempo'?'Tempo':'Base',v.contrat?.kva?` · ${v.contrat.kva} kVA`:'',
-   v.heures_creuses?.length?`Heures creuses de ${v.heures_creuses[0][0]} à ${v.heures_creuses[0][1]}.`:'Le simulateur arrive avec la première version stable.'));
+ private _goes(v:View){
+  const out:TemplateResult[]=[];
+  const j=v.jour;
+  if(v.equipement.soleil&&j?.soleil_kwh!=null)out.push(this._go('soleil','sun','--nw-sun','Soleil · aujourd\'hui',kwh(j.soleil_kwh),'kWh produits',
+   j.soleil_garde!=null?`La maison en a gardé ${j.soleil_garde} %.`:'Rien encore aujourd\'hui.'));
+  const heat=this._heatSum(v);
+  if(heat)out.push(this._go('chauffage','flame','--nw-heat','Chauffage · depuis le 1er oct.',heat.val,heat.unit,heat.say));
+  if(v.veille)out.push(this._go('veille','moon','--nw-watch','Veille · chaque nuit',String(v.veille.w),'W quand tout dort',
+   v.veille.euros_par_an!=null?`Environ ${year(v.veille.euros_par_an)} € par an.`:'Ce que tire la maison quand tout dort.'));
+  const e=v.eau,leak=v.direct?.fuite?.minutes;
+  if(e)out.push(this._go('eau','drop','--nw-water','Eau · ce mois-ci',e.mois_euros!=null?bill(e.mois_euros):num(e.mois_l,0),e.mois_euros!=null?'€':'litres',
+   `${e.mois_euros!=null?`${num(e.mois_l,0)} litres. `:''}${leak?`L'eau coule depuis ${Math.round(leak)} min.`:'Pas de fuite.'}`));
+  const a=v.appareils_jour?.appareils?.[0];
+  if(a)out.push(this._go('appareils','plug','--nw-home','Appareils · aujourd\'hui',kwh(a.kwh),`kWh · ${a.nom}`,'Celui qui a le plus consommé.'));
+  const p=v.pointe;
+  if(p)out.push(this._go('pointe','bolt','--nw-grid','Pointe · aujourd\'hui',kw(p.kw*1000),'kW au plus fort',
+   v.contrat?.kva?`Sur ${v.contrat.kva} kVA : ${p.part!=null&&p.part>=.7?'près de la limite':'de la marge'}.`:'L\'heure la plus chargée.'));
+  const c=v.contrat;
+  if(c?.option==='hphc'&&c.part_hc!=null)out.push(this._go('contrat','doc','--nw-ok','Contrat · ce mois-ci',String(Math.round(c.part_hc*100)),
+   atNight(offpeak(v.heures_creuses))?'% la nuit':'% en heures creuses','de vos achats en heures creuses.'));
+  else if(c)out.push(this._go('contrat','doc','--nw-ok','Contrat · ce mois-ci',c.option==='tempo'?'Tempo':c.option==='hphc'?'HP / HC':'Base',c.kva?` · ${c.kva} kVA`:'',
+   c.option==='base'&&c.prix_base!=null?`${price(c.prix_base)} € le kWh à toute heure.`:'Vos prix et vos heures.'));
   return out;
  }
+ /** The heating season in one figure: stove and radiators together, or the one known. */
+ private _heatSum(v:View):{val:string;unit:string;say:string;both:boolean}|null{
+  const h=v.chauffage,el=h?.etat==='pret'?h.saison:null,st=h?.poele?.saison;
+  if(el?.eur!=null&&st?.eur!=null)return {val:eur(el.eur+st.eur),unit:'€',say:`Poêle ${eur(st.eur)} €, radiateurs ${eur(el.eur)} €.`,both:true};
+  if(st)return {val:st.eur!=null?eur(st.eur):num(st.kg,0),unit:st.eur!=null?'€':'kg',say:`Poêle : ${num(st.kg,0)} kg de granulés.`,both:false};
+  if(el)return {val:el.eur!=null?eur(el.eur):kwh(el.kwh),unit:el.eur!=null?'€':'kWh',say:'Radiateurs, estimés d\'après le froid.',both:false};
+  if(h?.etat==='peu_lie')return {val:'—',unit:'',say:'Vous chauffez sans doute avec une autre énergie.',both:false};
+  return null;
+ }
 
- /* ── 3 · The detail cards ── */
- private _detail(v:View,key:Rubric,over:boolean){
-  const meta:Record<Rubric,[string,string,string,string]>={
-   chauffage:['Chauffage','flame','--nw-heat','Ce que coûte le chauffage de la maison.'],
-   veille:['Veille de nuit','moon','--nw-watch','Ce que la maison consomme quand tout dort : la box, le frigo, ce qui reste branché.'],
-   contrat:['Mon contrat','doc','--nw-ok','Le contrat lu sur le compteur et la page Énergie, et ses heures creuses.'],
-   soleil:['Soleil','sun','--nw-sun','Ce que font les panneaux aujourd\'hui, et ce que la maison en garde.'],
-   eau:['Eau','drop','--nw-water','Le compteur d\'eau, et ce qu\'il raconte.'],
-   appareils:['Appareils','plug','--nw-home','Ce que mesurent les prises et les pinces.'],
-   pointe:['Pointe de puissance','grid','--nw-grid','Au-delà de la puissance souscrite, le disjoncteur coupe.'],
-  };
-  const [t,ic,c,say]=meta[key];
-  return html`<div class="head"><span class="nw-panel-icon tint" style="--c:var(${c});width:36px;height:36px;border-radius:11px">${icon(ic)}</span>
-    <div><div class="nw-label">Tout voir — ${this._name()}</div><div class="name">${t}</div></div>${over?html`<button class="d-close" aria-label="Fermer" @click=${()=>{this._open=undefined;}}>×</button>`:nothing}</div>
-   <p class="d-say m-say">${say}</p><div class="sec-body">${this._detailBody(v,key)}</div>`;
+ /* ── 3 · The detail cards: the answer header, then the panels ── */
+ private _ans(o:{ic:string;c:string;subject:string;period:string;title:unknown;why?:unknown;pill?:[string,string];over:boolean}){
+  return html`<div class="ans-k"><span class="ico" style="--c:var(${o.c})">${icon(o.ic)}</span><span class="nw-label">${o.subject} · <i>${o.period}</i></span>
+    ${o.pill?html`<span class="pastille" style="--c:var(${o.pill[1]})">${o.pill[0]}</span>`:nothing}
+    ${o.over?html`<button class="d-close" aria-label="Fermer" @click=${()=>{this._open=undefined;}}>×</button>`:nothing}</div>
+   <div><p class="ans-t">${o.title}</p>${o.why?html`<p class="ans-w">${o.why}</p>`:nothing}</div>`;
  }
- /* Each panel yesterday (5.5): its kWh, the one behind its usual share named, the silent inverter said first. */
- private _panelsHealth(v:View){
-  const p=v.panneaux;
-  if(!p?.hier?.length)return nothing;
-  const behind=new Map(p.en_retrait.map(b=>[b.nom,b.pourcent_de_moins]));
-  const say=p.onduleur_muet_min?`L'onduleur ne répond plus depuis ${p.onduleur_muet_min<120?`${p.onduleur_muet_min} min`:`${Math.round(p.onduleur_muet_min/60)} h`}.`
-   :p.en_retrait.length?`${p.en_retrait[0].nom} a produit ${p.en_retrait[0].pourcent_de_moins} % de moins que d'habitude.`:'Chaque panneau a produit comme d\'habitude.';
-  return this._panel({t:'Chaque panneau, hier',src:'onduleurs',ic:'sun',c:p.onduleur_muet_min||p.en_retrait.length?'--nw-act':'--nw-sun',say,
-   body:html`<div class="rows">${[...p.hier].sort((a,b)=>b.kwh-a.kwh).map(r=>html`<div class="row"><span>${r.nom}</span><span class="v">${kwh(r.kwh)} kWh${behind.has(r.nom)?html` <span class="muted">· −${behind.get(r.nom)} %</span>`:nothing}</span></div>`)}</div>`});
+ private _enc(title:string,say:unknown,body?:unknown,o:{wide?:boolean;aside?:unknown;foot?:unknown}={}){
+  return html`<div class="nw-panel${o.wide?' wide':''}"><div class="nw-panel-head"><h3><span>${title}</span></h3>${o.aside?html`<span class="aside">${o.aside}</span>`:nothing}</div>
+   ${say?html`<p class="say">${say}</p>`:nothing}${body??nothing}${o.foot?html`<div class="foot">${o.foot}</div>`:nothing}</div>`;
  }
- private _detailBody(v:View,key:Rubric){
-  const d=v.direct,bands=offpeakBands(v.heures_creuses);
-  if(key==='chauffage'){
-   const h=v.chauffage,m=h?.mois,w=h?.hiver_dernier,st=h?.poele;
-   const sp=st?.mois??st?.saison,when=st?.mois?'ce mois':'depuis octobre';
-   const stove=st&&sp?this._panel({t:'Poêle à granulés',src:'Suivi Stock Pellet',ic:'flame',c:'--nw-heat',val:sp.eur!=null?eur(sp.eur):num(sp.kg,0),unit:`${sp.eur!=null?'€':'kg'} ${when}`,
-    say:st.mois?`${num(st.mois.kg,0)} kg de granulés ce mois, ${num(st.saison.kg,0)} kg depuis octobre${st.saison.eur!=null?` (${eur(st.saison.eur)} €)`:''}.`:`${num(st.saison.kg,0)} kg de granulés depuis octobre.`,
-    foot:st.prix_kg==null?html`<span>Indiquez le prix du sac dans les réglages pour voir les euros.</span>`:nothing}):nothing;
-   if(h?.etat==='sans_meteo')return html`${stove}${this._panel({t:'Il manque Hestia Météo',ic:'flame',c:'--nw-heat',wide:true,say:'Pour estimer le chauffage, Hestia a besoin de savoir quel froid il a fait chaque jour : ajoutez Hestia Météo.'})}`;
-   if(h?.etat==='meteo_ancienne')return html`${stove}${this._panel({t:'Hestia Météo à mettre à jour',ic:'flame',c:'--nw-heat',wide:true,say:'Pour estimer le chauffage, Hestia a besoin du froid de chaque jour : mettez Hestia Météo à jour.'})}`;
-   if(h?.etat==='apprend')return html`${stove}${this._panel({t:'En apprentissage',ic:'flame',c:'--nw-heat',wide:true,say:'Il faut quelques semaines de froid pour estimer le chauffage. Revenez cet hiver.'})}`;
-   if(h?.etat==='peu_lie')return html`${stove}${this._panel({t:'Une autre énergie',ic:'flame',c:'--nw-heat',wide:true,say:'Votre électricité varie peu avec le froid : vous chauffez sans doute surtout avec une autre énergie (poêle, gaz…).'})}`;
-   const val=(x:Heat|null|undefined)=>x?.eur!=null?eur(x.eur):kwh(x?.kwh),unit=(x:Heat|null|undefined)=>x?.eur!=null?'€':'kWh';
-   return html`${stove}${this._panel({t:st?'Radiateurs, ce mois':'Ce mois',src:'estimé',ic:'flame',c:'--nw-heat',val:val(m),unit:unit(m),say:m?`Environ ${kwh(m.kwh)} kWh.`:nothing})}
-    ${w?this._panel({t:'L\'hiver dernier',src:'octobre à avril',ic:'flame',c:'--nw-heat',val:val(w),unit:unit(w),say:w.eur!=null?`Environ ${kwh(w.kwh)} kWh.`:'Le prix de cet hiver n\'est pas connu de Hestia.'}):nothing}
-    ${this._panel({t:'Comment c\'est estimé',ic:'doc',c:'--nw-ok',wide:true,say:'Chaque jour, Hestia compare votre consommation au froid qu\'il a fait : ce qui augmente quand il fait froid, c\'est surtout le chauffage.'})}`;
+ /** « aujourd'hui, jusqu'à 17 h »: the statistics' last whole hour today. */
+ private _until(v:View){const s=v.jusqu_ici;return s?`aujourd'hui, jusqu'à ${hour(new Date(s.jusqu_a).getHours())}`:'aujourd\'hui';}
+ private _detail(v:View,key:Rubric,over:boolean):TemplateResult{
+  switch(key){
+   case 'soleil':return this._sun(v,over);
+   case 'chauffage':return this._heat(v,over);
+   case 'veille':return this._night(v,over);
+   case 'eau':return this._water(v,over);
+   case 'appareils':return this._devices(v,over);
+   case 'pointe':return this._peak(v,over);
+   default:return this._contract(v,over);
   }
-  if(key==='veille'){
-   const hist=v.veille_historique??[];
-   return html`${this._panel({t:'La veille, nuit après nuit',src:`appris sur ${v.veille?.nuits??0} nuits`,ic:'moon',c:'--nw-watch',wide:true,val:String(v.veille?.w??'—'),unit:'W',
-     say:v.veille?.euros_par_an!=null?`Environ ${eur(v.veille.euros_par_an)} € par an, sans rien allumer.`:nothing,
-     body:hist.length?bars(hist.map(x=>x.w),{W:640,h:50,unit:' W',color:()=>'var(--nw-watch)',ticks:[[0,new Date(hist[0].jour).toLocaleDateString('fr-FR',{day:'numeric',month:'short'})],[hist.length-1,'hier']]}):nothing})}
-    ${this._panel({t:'Où chercher',ic:'plug',c:'--nw-watch',body:html`<div class="rows"><div class="row"><span>Un chauffage d'appoint en hors-gel</span><span class="v">souvent</span></div><div class="row"><span>Un chargeur, une console en veille</span><span class="v">parfois</span></div><div class="row"><span>Un frigo qui vieillit</span><span class="v">plus rare</span></div></div>`,foot:html`<span>Une prise mesurée le dirait tout de suite</span>`})}`;
+ }
+
+ private _sun(v:View,over:boolean){
+  const j=v.jour,s=v.soleil_jour,head={ic:'sun',c:'--nw-sun',subject:'Soleil',period:this._until(v),over};
+  if(!v.equipement.soleil||j?.soleil_kwh==null)return this._ans({...head,period:'aujourd\'hui',title:'Pas de panneaux dans la page Énergie',why:'Ajoutez leur production dans la page Énergie de Home Assistant : Hestia la lira.'});
+  if(j.soleil_kwh<0.05)return this._ans({...head,title:'Les panneaux n\'ont encore rien produit',why:'Le soleil arrive : cette carte se remplit au fil des heures.'});
+  const sold=j.revendu_kwh??0,kept=Math.max(0,j.soleil_kwh-sold);
+  const top=s?.plus_fort,hours=(v.heures?.aujourdhui??[]).map(h=>h.soleil);
+  const p=v.panneaux,groups=s?.groupes??[];
+  const health=p?.onduleur_muet_min?html`L'onduleur ne répond plus depuis <b>${p.onduleur_muet_min<120?`${p.onduleur_muet_min} min`:`${Math.round(p.onduleur_muet_min/60)} h`}</b>.`
+   :p?.en_retrait?.length?html`<b>${p.en_retrait[0].nom}</b> produit ${p.en_retrait[0].pourcent_de_moins} % de moins que d'habitude : à regarder.`
+   :html`Les <b>${groups.length} groupes</b> ont produit comme d'habitude : aucun ne faiblit.`;
+  return html`${this._ans({...head,title:html`Les panneaux ont produit <b>${kwh(j.soleil_kwh)} kWh</b>`,
+    why:j.soleil_garde!=null?html`La maison en a gardé <b>${j.soleil_garde} %</b>.${sold>=0.05?html` Le reste, ${kwh(sold)} kWh, est parti au réseau${j.revendu_euros!=null?html` pour <b>${eur(j.revendu_euros)} €</b>`:''}.`:''}`:nothing})}
+   <div class="encs">
+    ${this._enc('Heure par heure',top?html`Le soleil a donné le plus entre <b>${hour(top.h)} et ${hour(top.h+1)} : ${kwh(top.kwh)} kWh</b>. C'est à ces heures-là qu'une machine tourne au soleil.`:nothing,
+     html`${cols(hours,'--nw-sun',{pin:x=>`${kwh(x)} kWh`})}${H_TICKS}`,{wide:true})}
+    ${this._enc('Où est parti le soleil',s?.prix_evite!=null&&v.contrat?.revente!=null?html`Le garder vaut mieux que le vendre : il évite <b>${price(s.prix_evite)} €</b> le kWh, la revente n'en paie que <b>${price(v.contrat.revente)} €</b>.`
+     :html`La maison en a gardé <b>${kwh(kept)} kWh</b>.`,
+     html`<div><div class="split"><i style="width:${kept/j.soleil_kwh*100}%;--c:var(--nw-benefit)"></i><i style="width:${sold/j.soleil_kwh*100}%;--c:var(--nw-sun)"></i></div>
+      <div class="split-l"><span>gardé <b>${kwh(kept)} kWh</b></span><span>vendu <b>${kwh(sold)} kWh${j.revendu_euros!=null?` · ${eur(j.revendu_euros)} €`:''}</b></span></div></div>`)}
+    ${groups.length?this._enc('Chaque groupe de panneaux',health,hb(top5(groups.map(g=>({n:g.nom,v:g.kwh,txt:`${kwh(g.kwh)} kWh`})),x=>`${kwh(x)} kWh`),'--nw-sun')):nothing}
+   </div>`;
+ }
+
+ private _heat(v:View,over:boolean){
+  const h=v.chauffage,st=h?.poele,stove=st?.saison,el=h?.etat==='pret'?h.saison:null,sum=this._heatSum(v);
+  const head={ic:'flame',c:'--nw-heat',subject:'Chauffage',period:'depuis le 1er octobre',over};
+  const why:Record<string,string>={sans_meteo:'Pour estimer les radiateurs, Hestia a besoin du froid de chaque jour : ajoutez Hestia Météo.',
+   meteo_ancienne:'Pour estimer les radiateurs, Hestia a besoin du froid de chaque jour : mettez Hestia Météo à jour.',
+   apprend:'Il faut quelques semaines de froid pour estimer les radiateurs. Revenez cet hiver.',
+   peu_lie:'Votre électricité varie peu avec le froid : vous chauffez sans doute surtout avec une autre énergie.'};
+  const how='Radiateurs : estimés en comparant chaque jour votre électricité au froid qu\'il a fait.';
+  let title:unknown,answer:unknown;
+  if(sum?.both){title=html`Se chauffer a coûté <b>${sum.val} €</b>`;answer=html`Le poêle <b>${eur(stove!.eur)} €</b> de granulés, les radiateurs électriques <b>environ ${eur(el!.eur)} €</b>.`;}
+  else if(stove){title=stove.eur!=null?html`Le poêle a coûté <b>${eur(stove.eur)} €</b>`:html`Le poêle a brûlé <b>${num(stove.kg,0)} kg</b> de granulés`;
+   answer=html`${stove.eur!=null?html`<b>${num(stove.kg,0)} kg</b> de granulés. `:''}${el?html`Les radiateurs, <b>environ ${el.eur!=null?`${eur(el.eur)} €`:`${kwh(el.kwh)} kWh`}</b>.`:why[h?.etat??'']??''}`;}
+  else if(el){title=el.eur!=null?html`Les radiateurs ont coûté <b>environ ${eur(el.eur)} €</b>`:html`Les radiateurs ont pris <b>environ ${kwh(el.kwh)} kWh</b>`;answer=how;}
+  else return this._ans({...head,title:h?.etat==='peu_lie'?'Une autre énergie chauffe la maison':'Le chauffage n\'est pas encore estimé',why:why[h?.etat??'']??'Ajoutez Hestia Météo, ou le suivi de votre poêle.'});
+  const share=sum?.both&&el?.eur!=null&&stove?.eur!=null?stove.eur/(stove.eur+el.eur):null;
+  const who=share==null?nothing:this._enc('Qui chauffe',share>=.4&&share<=.6?html`Le poêle et les radiateurs font <b>chacun la moitié</b> de la dépense.`
+    :html`${share>.6?'Le poêle fait':'Les radiateurs font'} <b>${Math.round((share>.6?share:1-share)*100)} %</b> de la dépense.`,
+   hb([{n:'Poêle',v:stove!.eur!,txt:`${eur(stove!.eur)} €`,sub:`${num(stove!.kg,0)} kg`},{n:'Radiateurs',v:el!.eur!,txt:`${eur(el!.eur)} €`,sub:`${kwh(el!.kwh)} kWh`}],'--nw-heat'),{foot:how});
+  const deg=h?.euros_par_degre;
+  const cold=deg!=null&&el?this._enc('Le froid fait la facture',html`Chaque degré de froid en plus coûte <b>environ ${cents(deg)} € par jour</b> de radiateurs.`,nothing,
+   {foot:html`Exemple : un jour à 5 °C au lieu de 10 °C, <b>${eur(deg*5)} €</b> de plus.`}):nothing;
+  const stock=st?.stock_kg;
+  const bags=stock!=null&&st?.sac_kg?Math.round(stock/st.sac_kg*10)/10:null;
+  const pellets=stock!=null&&stove?this._enc('Granulés en stock',stock<=0?html`<b>Plus de granulés</b> en stock.`
+    :html`Il reste <b>${bags!=null?`${num(bags,1)} sac${bags>1?'s':''} (${num(stock,0)} kg)`:`${num(stock,0)} kg`}</b>${st?.jours_restants!=null?html` : au rythme de cette saison, <b>environ ${st.jours_restants} jours</b> de poêle`:''}.`,
+   html`<div><div class="track" style="--c:var(--nw-heat)"><i style="width:${stove.kg+stock>0?stove.kg/(stove.kg+stock)*100:0}%"></i></div>
+    <div class="track-l"><span>brûlés <b>${num(stove.kg,0)} kg</b></span><span>en stock <b>${num(stock,0)} kg</b></span></div></div>`):nothing;
+  return html`${this._ans({...head,title,why:answer})}<div class="encs">${who}${cold}${pellets}</div>`;
+ }
+
+ private _night(v:View,over:boolean){
+  const w=v.veille,hist=v.veille_historique??[],head={ic:'moon',c:'--nw-watch',subject:'Veille',over};
+  if(!w)return this._ans({...head,period:'les dernières nuits',title:'La veille n\'est pas encore connue',why:'Il faut deux semaines de nuits mesurées heure par heure.'});
+  const n=w.nuit,e=w.evolution;
+  const rows:Bar[]=(n?.appareils??[]).map(r=>({n:r.nom,v:r.w,txt:`${r.w} W`,sub:r.euros_par_an!=null?`${year(r.euros_par_an)} € par an`:undefined}));
+  if(n?.sans_prise_w)rows.push({n:'Sans prise mesurée',v:n.sans_prise_w,txt:`${n.sans_prise_w} W`,sub:n.sans_prise_euros_par_an!=null?`${year(n.sans_prise_euros_par_an)} € par an`:undefined,dash:true});
+  rows.sort((a,b)=>b.v-a.v);
+  const what=n&&rows.length?this._enc('Ce qui tourne la nuit',n.sans_prise_w?html`Les prises mesurées expliquent <b>${n.mesure_w} W</b>. Les <b>${n.sans_prise_w} W</b> qui restent viennent d'appareils sans prise mesurée : c'est là qu'il faut chercher.`
+    :html`Les prises mesurées expliquent toute la veille : <b>${n.mesure_w} W</b>.`,hb(top5(rows,x=>`${Math.round(x)} W`),'--nw-watch'),{wide:true,aside:'au plus calme de la nuit'}):nothing;
+  const since=e?dayMonth(e.debut):'';
+  const drift=hist.length>1?this._enc('Nuit après nuit',e&&Math.abs(e.ecart_w)>=10?html`Elle est passée de <b>${e.debut_w} W à ${w.w} W</b> depuis le ${since}${e.ecart_euros_par_an!=null?html` : <b>environ ${year(Math.abs(e.ecart_euros_par_an))} € par an</b> de ${e.ecart_w<0?'moins':'plus'}`:''}.`
+    :html`Elle reste autour de <b>${w.w} W</b> depuis le ${since}.`,
+   html`${cols(hist.map(x=>x.w),'--nw-watch',{pin:x=>`${x} W`,max:Math.max(...hist.map(x=>x.w))*1.09})}<div class="ticks"><span>${dayOf(hist[0].jour)} ${SHORT[noon(hist[0].jour).getMonth()]}</span><span>cette nuit</span></div>`,{wide:true}):nothing;
+  return html`${this._ans({...head,period:`les ${hist.length>1?hist.length:w.nuits} dernières nuits`,title:html`Quand tout dort, la maison tire encore <b>${w.w} W</b>`,
+    why:w.euros_par_an!=null?html`Ce fond tourne jour et nuit, même sans rien allumer : <b>environ ${year(w.euros_par_an)} € par an</b>.`:'Ce fond tourne jour et nuit, même sans rien allumer.'})}
+   <div class="encs">${what}${drift}</div>`;
+ }
+
+ private _water(v:View,over:boolean){
+  const e=v.eau,now=new Date(),leak=v.direct?.fuite?.minutes,head={ic:'drop',c:'--nw-water',subject:'Eau',over};
+  if(!e)return this._ans({...head,period:'ce mois-ci',title:'Pas de compteur d\'eau',why:'Ajoutez-le dans la page Énergie de Home Assistant : Hestia le lira.'});
+  const days=e.jours??[],month=MONTHS[now.getMonth()];
+  const pill:[string,string]=leak?[`L'eau coule depuis ${Math.round(leak)} min`,leak>=60?'--nw-alert':'--nw-act']:['Pas de fuite','--nw-ok'];
+  const big=e.plus_gros;
+  const ticks=days.map((d,i)=>i===days.length-1?'auj.':days.length<=12||[0,7,14,21,28].includes(i)?String(noon(d.jour).getDate()):'');
+  return html`${this._ans({...head,period:`${month}, du 1er au ${now.getDate()}`,pill,
+    title:html`<b>${num(e.mois_l,0)} litres</b>${e.mois_euros!=null?html`, soit <b>${bill(e.mois_euros)} €</b>`:''}`,
+    why:html`${e.l_par_jour!=null?html`Environ <b>${num(e.l_par_jour,0)} litres par jour</b>. `:''}${e.prix_m3!=null?html`L'eau coûte ${price(e.prix_m3)} € le m³, soit <b>${price(e.euros_100_l)} € les 100 litres</b>.`:''}`})}
+   ${days.length?html`<div class="encs">${this._enc('Jour par jour',big?html`Le plus gros jour : <b>le ${dayMonth(big.jour)}, ${num(big.l,0)} litres</b>${big.euros!=null?`, soit ${eur(big.euros)} €`:''}. Un jour qui sort du lot se voit tout de suite.`:nothing,
+    html`${cols(days.map(d=>d.l),'--nw-water',{pin:x=>`${num(x,0)} L`,part:days.length-1})}<div class="ticks days">${ticks.map(t=>html`<span>${t}</span>`)}</div>`,{wide:true})}</div>`:nothing}`;
+ }
+
+ private _devices(v:View,over:boolean){
+  const a=v.appareils_jour,running=v.direct?.en_marche??[],head={ic:'plug',c:'--nw-home',subject:'Appareils',period:this._until(v),over};
+  if(!a||!a.appareils.length)return this._ans({...head,title:'Aucun appareil mesuré',why:'Ajoutez vos prises mesurées dans la page Énergie de Home Assistant (consommation individuelle).'});
+  const live=new Map(running.map(r=>[r.nom,r.w])),top=a.appareils[0];
+  const rows:Bar[]=a.appareils.map(r=>({n:r.nom,v:r.kwh,txt:`${kwh(r.kwh)} kWh`,sub:r.euros!=null?`${eur(r.euros)} €`:undefined,live:live.has(r.nom)?`${kw(live.get(r.nom)!)} kW`:undefined}));
+  // A device that runs now but has nothing counted yet today still shows, with its live power.
+  for(const r of running)if(!rows.some(x=>x.n===r.nom))rows.push({n:r.nom,v:0,txt:'0 kWh',live:`${kw(r.w)} kW`});
+  const shown=rows.filter((r,i)=>i<5||r.live),rest=rows.filter(r=>!shown.includes(r)),restKwh=rest.reduce((s,r)=>s+r.v,0);
+  const plural=rest.length>1?'s':'';
+  const foot=rest.length||a.sans_prise_kwh?html`${rest.length?html`Et ${rest.length} autre${plural} appareil${plural} mesuré${plural} : <b>${kwh(restKwh)} kWh</b>. `:''}${a.sans_prise_kwh?html`Les ${kwh(a.sans_prise_kwh)} kWh restants viennent d'appareils sans prise mesurée.`:''}`:nothing;
+  return html`${this._ans({...head,title:html`${top.nom} a le plus consommé : <b>${kwh(top.kwh)} kWh</b>`,
+    why:html`Les appareils mesurés font <b>${kwh(a.mesure_kwh)} kWh</b> sur les ${kwh(a.maison_kwh)} kWh de la maison.`})}
+   <div class="encs">${this._enc('Appareil par appareil',top.euros!=null?html`Ce que chacun a coûté depuis minuit, soleil déduit : ${top.nom} <b>${eur(top.euros)} €</b>.`:'Ce que chacun a consommé depuis minuit.',
+    hb(shown,'--nw-home'),{wide:true,aside:running.length?html`<span class="live">en marche</span>`:nothing,foot})}</div>`;
+ }
+
+ private _peak(v:View,over:boolean){
+  const p=v.pointe,kva=v.contrat?.kva,hours=(v.heures?.aujourdhui??[]).map(h=>h.achat),head={ic:'bolt',c:'--nw-grid',subject:'Pointe',period:'aujourd\'hui',over};
+  if(!p)return this._ans({...head,title:'Pas encore d\'heure mesurée aujourd\'hui',why:'La pointe se lit heure par heure : il faut le compteur heure par heure.'});
+  const high=p.part!=null&&p.part>=.7;
+  const ranges=offpeak(v.heures_creuses),band=(i:number)=>ranges.some(([a,b])=>i*60+30>=a&&i*60+30<b);
+  const far=p.part==null?'':p.part<.5?'vous en êtes loin':p.part<.8?'il reste de la marge':'vous en êtes tout près';
+  return html`${this._ans({...head,pill:kva?(high?['Près de la limite','--nw-act']:['De la marge','--nw-ok']):undefined,
+    title:html`Au plus fort, la maison a pris <b>${kw(p.kw*1000)} kW</b> au réseau`,
+    why:html`Entre ${hour(p.h)} et ${hour(p.h+1)}.${kva?html` Le compteur coupe au-delà de <b>${kva} kVA</b> (environ ${kva} kW) : ${far}.`:''}`})}
+   <div class="encs">${this._enc('Heure par heure',p.part!=null?html`La barre la plus haute reste à <b>${part(p.part)} de la limite</b> : ${high?'deux gros appareils de plus pourraient faire couper le compteur':'rien ne risque de faire couper le compteur'}.`:nothing,
+    html`${cols(hours,'--nw-grid',{pin:x=>`${kw(x*1000)} kW`,bands:ranges.length?band:undefined,tall:true,...(kva?{max:kva*1.07,limit:kva,limitLabel:`limite ${kva} kVA`}:{})})}${H_TICKS}
+     <div class="nw-legend"><span><i style="--c:var(--nw-grid)"></i>pris au réseau, en moyenne sur l'heure</span>${ranges.length?html`<span><i style="--c:color-mix(in oklab, var(--nw-cold) 40%, transparent)"></i>heures creuses</span>`:nothing}</div>`,{wide:true})}</div>`;
+ }
+
+ private _contract(v:View,over:boolean){
+  const c=v.contrat,now=new Date(),head={ic:'doc',c:'--nw-ok',subject:'Contrat',period:'ce mois-ci',over};
+  const ranges=offpeak(v.heures_creuses),night=atNight(ranges);
+  const kvaSay=c?.kva?`Puissance : ${c.kva} kVA.`:'';
+  const lines:[string,number|null|undefined,string][]=[
+   ...(c?.option==='hphc'?[['Heures pleines',c.prix_hp,'le kWh'],['Heures creuses',c.prix_hc,'le kWh']] as [string,number|null|undefined,string][]
+    :c?.option==='base'?[['Le kWh',c.prix_base,'à toute heure']] as [string,number|null|undefined,string][]:[]),
+   [`Abonnement${c?.kva?` ${c.kva} kVA`:''}`,c?.abonnement_mois,'par mois'],['Revente du soleil',c?.revente,'le kWh']];
+  const prices=this._enc('Vos prix',c?.abonnement_mois!=null?html`L'abonnement, <b>${eur(c.abonnement_mois)} € par mois</b>, se paie même sans rien consommer.`:nothing,
+   html`<div class="hb list">${lines.filter(r=>r[1]!=null).map(([n,x,u])=>html`<span class="n">${n}</span><span class="v">${u==='par mois'?eur(x):price(x)} €<small>${u}</small></span>`)}</div>`);
+  if(c?.option!=='hphc'){
+   const base=c?.option==='base';
+   return html`${this._ans({...head,title:base&&c?.prix_base!=null?html`Option Base : <b>${price(c.prix_base)} €</b> le kWh à toute heure`:html`Option <b>${c?.option==='tempo'?'Tempo':'Base'}</b>`,why:kvaSay})}
+    <div class="encs">${prices}</div>`;
   }
-  if(key==='contrat'){
-   const p=v.contrat?.prix??{},row=(l:string,x:number|null|undefined)=>x!=null?html`<div class="row"><span>${l}</span><span class="v">${num(x,4)} € le kWh</span></div>`:nothing;
-   return html`${this._panel({t:'Votre contrat',src:'compteur · page Énergie',ic:'doc',c:'--nw-ok',val:v.contrat?.option==='hphc'?'Heures pleines / creuses':v.contrat?.option==='tempo'?'Tempo':'Base',unit:v.contrat?.kva?`${v.contrat.kva} kVA`:'',
-     body:html`<div class="rows">${row('Heures pleines',p.hp)}${row('Heures creuses',p.hc)}${row('Base',p.base)}${row('Revente du surplus',v.contrat?.revente)}</div>`})}
-    ${this._panel({t:'Heures creuses',src:'apprises sur le compteur',ic:'clock',c:'--nw-cold',say:v.heures_creuses?.length?v.heures_creuses.map(([a,b])=>`De ${a} à ${b}`).join(' et ')+'.':'Pas d\'heures creuses lues.',
-     foot:d?.prochain_changement?html`<span>Prochain passage : <b>${new Date(d.prochain_changement.a).toLocaleTimeString('fr-FR',{hour:'numeric',minute:'2-digit'}).replace(':',' h ')}</b></span>`:nothing})}
-    ${this._panel({t:'Sur 12 mois, avec votre vraie consommation',src:'estimation',ic:'doc',c:'--nw-ok',wide:true,body:html`<div class="empty">Le simulateur de contrat (Base, heures creuses, Tempo) arrive avec la première version stable.</div>`})}`;
-  }
-  if(key==='soleil'){
-   const hours=v.heures?.aujourdhui??[],src=d?.sources?.soleil;
-   return html`${this._panel({t:'Aujourd\'hui',src:src?.retenu??'',ic:'sun',c:'--nw-sun',wide:true,val:kwh(v.jour?.soleil_kwh),unit:'kWh produits',
-     say:v.jour?.revendu_kwh!=null?`${kwh(v.jour.revendu_kwh)} kWh revendus : ${eur(v.jour.revendu_euros)} €.`:nothing,
-     body:html`${bars(hours.map(x=>x.soleil),{W:640,h:60,ticks:H_TICKS,unit:' kWh',color:()=>'var(--nw-sun)'})}<div class="nw-legend"><span><i style="--c:var(--nw-sun)"></i>produit, heure par heure</span></div>`})}
-    ${this._panel({t:'Hier',ic:'home',c:'--nw-sun',val:v.hier?.soleil_garde!=null?String(v.hier.soleil_garde):'—',unit:'% du soleil gardé',say:v.hier?.soleil_couvre!=null?`Le soleil a couvert ${v.hier.soleil_couvre} % de la maison.`:nothing})}
-    ${this._panel({t:'Sources',ic:'doc',c:'--nw-ok',body:html`<div class="rows"><div class="row"><span>Production</span><span class="v">${src?.retenu??'—'}</span></div>${(src?.ecartes??[]).map(e=>html`<div class="row"><span>${e.raison==='controle'?'Contrôle':'Écartée'}</span><span class="v">${e.source}</span></div>`)}</div>`})}
-    ${this._panelsHealth(v)}`;
-  }
-  if(key==='eau'){
-   const e=v.eau,f=d?.fuite;
-   return html`${this._panel({t:'Aujourd\'hui',src:'compteur',ic:'drop',c:'--nw-water',val:e?num(e.jour_l,0):'—',unit:'L'})}
-    ${this._panel({t:'Fuite',src:'débit',ic:'drop',c:f?.minutes?'--nw-alert':'--nw-ok',val:f?.minutes?`${Math.round(f.minutes)} min`:'Aucune',say:f?.minutes?'L\'eau coule sans s\'arrêter.':'Rien ne coule en continu en ce moment.'})}
-    ${this._panel({t:'Ce mois',src:e?.prix_m3!=null?`${num(e.prix_m3,2)} € le m³`:'',ic:'euro',c:'--nw-water',val:e?num(e.mois_l/1000,1):'—',unit:'m³',say:e?.mois_euros!=null?`${eur(e.mois_euros)} €.`:nothing})}`;
-  }
-  if(key==='appareils'){
-   const running=[...(d?.en_marche??[])].sort((a,b)=>b.w-a.w);
-   return html`${this._panel({t:'En marche',src:'prises · pinces',ic:'plug',wide:true,body:running.length?html`<div class="rows">${running.map(r=>html`<div class="row"><span>${r.nom}</span><span class="v">${kw(r.w)} kW</span></div>`)}</div>`:html`<div class="nw-say">Rien de gros ne tourne.</div>`})}
-    ${this._panel({t:'Ce mois, par usage',ic:'plug',body:html`<div class="empty">La répartition par usage et les cycles des machines arrivent avec la deuxième préversion.</div>`})}`;
-  }
-  const hours=v.heures?.aujourdhui??[];
-  return html`${this._panel({t:'Aujourd\'hui, heure par heure',src:'achats au réseau',ic:'bolt',c:'--nw-grid',wide:true,say:`Sur ${v.contrat?.kva??'—'} kVA souscrits.`,
-    body:bars(hours.map(x=>x.achat),{W:640,bands,ticks:H_TICKS,unit:' kWh',color:i=>bands.some(([a,b])=>i>=a&&i<b)?'var(--nw-cold)':'var(--nw-wind)'})})}
-   ${this._panel({t:'Délestage',src:'Versatile Thermostat',ic:'grid',c:'--nw-grid',say:'Versatile Thermostat coupe un radiateur avant le disjoncteur. Hestia lui donne la puissance de la maison et la limite.'})}`;
+  const label=v.heures_creuses?.length?v.heures_creuses.map(([a,b])=>`${nb(a)} à ${nb(b)}`).join(' et de '):null;
+  const nowMin=now.getHours()*60+now.getMinutes(),off=c.prix_hp&&c.prix_hc?1-c.prix_hc/c.prix_hp:null;
+  const share=c.part_hc,seuil=c.seuil_hc,mois=v.mois?.euros,gain=c.base_euros!=null&&mois!=null?c.base_euros-mois:null;
+  const pays=share!=null&&seuil!=null?this._enc('Les heures creuses rapportent-elles ?',html`Ce mois-ci, <b>${Math.round(share*100)} %</b> de vos achats sont tombés ${night?'la nuit':'en heures creuses'}. Elles rapportent à partir de <b>${Math.round(seuil*100)} %</b>${gain!=null?html` : sans elles (option Base), vous auriez payé <b>${eur(Math.abs(gain))} € de ${gain<0?'moins':'plus'}</b>`:''}.`,
+   html`<div><div class="track" style="--c:var(--nw-cold)"><i style="width:${share*100}%"></i><span class="mark" style="left:${Math.min(100,seuil*100)}%"></span></div>
+    <div class="track-l"><span>vous <b>${Math.round(share*100)} %</b></span><span>rentable dès <b>${Math.round(seuil*100)} %</b></span></div></div>`):nothing;
+  return html`${this._ans({...head,title:label?html`Heures creuses de <b>${label}</b>`:'Heures pleines et heures creuses',
+    why:html`${c.prix_hc!=null&&c.prix_hp!=null?html`${night?'La nuit':'En heures creuses'}, le kWh coûte <b>${price(c.prix_hc)} €</b> au lieu de <b>${price(c.prix_hp)} €</b>${night?' le jour':''}. `:''}${kvaSay}`})}
+   <div class="encs">
+    ${ranges.length?this._enc('Votre journée',off!=null?html`En bleu, les heures creuses : tout ce qui peut attendre y coûte <b>${part(off)} de moins</b>.`:'En bleu, les heures creuses.',
+     html`<div><div class="day">${ranges.map(([a,b])=>html`<i style="left:${a/14.4}%;width:${(b-a)/14.4}%"></i>`)}<span class="now" style="left:${nowMin/14.4}%"></span></div>${H_TICKS}</div>`,
+     {wide:true,aside:`il est ${clock(now)}`}):nothing}
+    ${prices}${pays}
+   </div>`;
  }
 }
 

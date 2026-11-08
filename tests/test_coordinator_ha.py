@@ -241,6 +241,34 @@ class FranksHome(unittest.IsolatedAsyncioTestCase):
         self.assertIsNotNone(heat["mois"])
         # The replay's year starts on 7 Nov. 2025: last winter is known from November only, so it is not shown.
         self.assertIsNone(heat["hiver_dernier"])
+        # The card's one period: the season, from 1 October; and what a degree of cold costs a day.
+        self.assertTrue(heat["saison"]["du"].endswith("-10-01"))
+        self.assertGreaterEqual(heat["saison"]["kwh"], heat["mois"]["kwh"])
+        self.assertGreater(heat["euros_par_degre"], 0.2)
+
+    async def test_what_the_detail_cards_read(self):
+        """Maquette des cartes 2 (INTERFACE.md § 4.2): one period per card, every figure from the view."""
+        _, coordinator = await self.setup()
+        d = coordinator.data
+        # The sun: the strongest hour today, each group of panels (an inverter's two channels together).
+        self.assertIsNotNone(d["soleil_jour"]["plus_fort"])
+        self.assertEqual(len(d["soleil_jour"]["groupes"]), 5)
+        # The night: the measured devices at the quietest hours, and the rest that no plug measures.
+        night = d["veille"]["nuit"]
+        self.assertTrue(night["appareils"])
+        self.assertLessEqual(night["mesure_w"], d["veille"]["w"] + 30)
+        self.assertIsNotNone(d["veille"]["evolution"])
+        # The contract this month: off-peak share, the Base option's euros, the break-even share.
+        c = d["contrat"]
+        self.assertTrue(0 < c["part_hc"] < 1)
+        self.assertIsNotNone(c["base_euros"])
+        self.assertTrue(0 < c["seuil_hc"] < 1)
+        # The peak today, against the 9 kVA.
+        self.assertLess(d["pointe"]["part"], 1)
+        # The devices today: never more than the whole home.
+        a = d["appareils_jour"]
+        self.assertLessEqual(a["mesure_kwh"], a["maison_kwh"] + 0.1)
+        self.assertFalse(any(r["nom"].startswith("sensor.") for r in a["appareils"]))
 
     async def test_the_reviews_are_sent_only_when_asked(self):
         """2.9: no notify service chosen, nothing sent; chosen, yesterday's review once at the chosen hour."""

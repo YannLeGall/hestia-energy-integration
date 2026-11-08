@@ -5,17 +5,17 @@ import {LitElement,html,css,nothing} from 'lit';
 type Config={type:string;card?:string;name?:string};
 type Hass={language?:string};
 
-/** Each format: its icon, its name, what it shows. The order is the card's three reading levels. */
+/** Each format: its icon, its name, what it shows and over which period (maquette des cartes 2). The order is the mock-up's. */
 export const FORMATS:[string,string,string,string][]=[
- ['complete','mdi:page-layout-body','Complète','le conseil, à savoir, maintenant, les rubriques'],
- ['tuile','mdi:dock-window','Tuile','une phrase, un chiffre'],
- ['chauffage','mdi:fire','Chauffage','ce qu’il coûte, radiateurs et poêle'],
- ['veille','mdi:weather-night','Veille de nuit','ce que consomme la maison quand tout dort'],
- ['contrat','mdi:file-document-outline','Contrat','le contrat, les prix et les heures creuses'],
- ['soleil','mdi:solar-power-variant','Soleil','la production, chaque panneau'],
- ['eau','mdi:water','Eau','le compteur d’eau et la fuite'],
- ['appareils','mdi:power-plug','Appareils','ce qui tourne en ce moment'],
- ['pointe','mdi:transmission-tower','Pointe','l’heure la plus chargée, la puissance souscrite'],
+ ['complete','mdi:page-layout-body','Complète','en ce moment, aujourd’hui, ce mois-ci, puis le détail'],
+ ['tuile','mdi:dock-window','Tuile','en ce moment : une phrase, un chiffre'],
+ ['soleil','mdi:solar-power-variant','Soleil','ce que les panneaux ont produit aujourd’hui'],
+ ['chauffage','mdi:fire','Chauffage','ce qu’a coûté la saison, depuis le 1er octobre'],
+ ['veille','mdi:weather-night','Veille','ce qui tourne la nuit, les 30 dernières nuits'],
+ ['eau','mdi:water','Eau','les litres et les euros du mois'],
+ ['appareils','mdi:power-plug','Appareils','ce que chaque appareil a consommé aujourd’hui'],
+ ['pointe','mdi:transmission-tower','Pointe','la plus forte puissance prise aujourd’hui'],
+ ['contrat','mdi:file-document-outline','Contrat','vos heures creuses et vos prix, ce mois-ci'],
 ];
 
 const follow=(e:MouseEvent)=>{e.preventDefault();history.pushState(null,'',(e.currentTarget as HTMLAnchorElement).getAttribute('href')??'/hestia/energie');

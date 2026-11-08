@@ -12,6 +12,7 @@ import asyncio
 import dataclasses
 from datetime import date, datetime, timedelta
 import logging
+import re
 from zoneinfo import ZoneInfo
 
 from homeassistant.const import EVENT_HOMEASSISTANT_STARTED
@@ -22,7 +23,7 @@ from homeassistant.util import dt as dt_util
 
 from . import reader
 from .const import DOMAIN
-from .engine import advice, anomaly, baseline, health, heating, solar, home as engine_home, live, phrases, report, sources, stats, tariff
+from .engine import advice, anomaly, baseline, cards, health, heating, solar, home as engine_home, live, phrases, report, sources, stats, tariff
 
 _LOGGER = logging.getLogger(__name__)
 YEAR_DAYS = 400
@@ -55,6 +56,7 @@ class EnergyCoordinator:
         self.weather_cold = "non"
         self._sent_on: date | None = None
         self.panel_names: dict[str, str] = {}
+        self.device_names: dict[str, str] = {}
         self.run_limits: dict[str, int] = {}     # 5.2: each device's learned « on for too long »
         self.run_hours: dict[str, int] = {}
         self.reference: dict[str, str] = {}
@@ -232,6 +234,7 @@ class EnergyCoordinator:
             self._follow_live()
             prices, export_price = self._prices(), self._export_price()
             self.panel_names = {c: solar.panel_name(_friendly(self.hass, c)) for c in self.extras["channels"]}
+            self.device_names = {m.stat: _device_name(_friendly(self.hass, m.stat)) for m in self.page.devices if not m.name}
             self.inverter_silent = self._inverter_silent()
             self.weather_cold = reader.weather_cold(self.hass)
             self.data.update(await self.hass.async_add_executor_job(self._reports, now, prices, export_price))
@@ -296,7 +299,14 @@ class EnergyCoordinator:
         winter_report = report.period(home, self.contract, self.table, tariff.day_bounds(start, self.tz)[0],
                                       tariff.day_bounds(end, self.tz)[1])
         winter = heating.over(learned, self.cold, start, end, winter_report.bought_kwh, winter_report.energy_eur)
+        # The season so far (from 1 October, the card's one period): the radiators at the season's own average price.
+        first = cards.season_start(today)
+        season_report = report.period(home, self.contract, self.table, tariff.day_bounds(first, self.tz)[0], local)
+        season = heating.over(learned, self.cold, first, today, season_report.bought_kwh, season_report.energy_eur)
+        per_kwh = season.eur / season.kwh if season is not None and season.eur is not None and season.kwh > 0 else None
         return {"etat": "pret", "mois": None if this_month is None else this_month.as_dict(),
+                "saison": None if season is None else {**season.as_dict(), "du": first.isoformat()},
+                "euros_par_degre": None if per_kwh is None else round(learned.per_degree_kwh * per_kwh, 3),
                 # A winter only shown nearly whole (9 days in 10): a part of it would look like a cheap winter.
                 "hiver_dernier": None if winter is None or winter.days < 0.9 * ((end - start).days + 1) else {**winter.as_dict(), "du": start.isoformat(),
                                                                                     "au": end.isoformat()},
@@ -323,8 +333,10 @@ class EnergyCoordinator:
             month, season = None, heating.pellets(found.get("season_kg"), per_kg)
         if season is None:
             return None
+        first = cards.season_start(now.date())
         return {"mois": None if month is None else month.as_dict(), "saison": season.as_dict(), "prix_kg": None if per_kg is None else round(per_kg, 3),
-                "sac_kg": found.get("bag_kg")}
+                "sac_kg": found.get("bag_kg"), "du": first.isoformat(),
+                **(cards.stove_stock(found.get("stock_kg"), season.kg, found.get("days_used"), first, now.date()) or {})}
 
     def _prices(self) -> dict:
         """The prices the Energy page gives now (an entity or a number), per period."""
@@ -368,6 +380,11 @@ class EnergyCoordinator:
             price = baseline.average_price(self._price_of("hp", now), self._price_of("hc", now))
         else:
             price = self._price_of("base", now)
+        hours_today = _hours(home, local.date())
+        nights = _baseloads(home, local.date())
+        # What a kWh of sun kept saves: the daytime price (peak hours, or Base).
+        avoided = self._price_of("hp" if self.contract.option == tariff.HPHC else "base", now) if self.contract.option != tariff.TEMPO else None
+        channels = {c: self.rows[c] for c in self.extras.get("channels") or [] if self.rows.get(c)}
         return {
             "palier": self.level.level if self.level else 0, "equipement": _level(self.level),
             "extensions": dict(self.extras), "marge": self.settings["margin"],
@@ -379,16 +396,25 @@ class EnergyCoordinator:
             "bilans": report.reviews(home, self.contract, self.table, now),
             "jusqu_ici": report.so_far(home, self.contract, self.table, now),
             "veille": None if base is None else {"w": base.watts, "nuits": base.nights,
-                                                  "euros_par_an": baseline.yearly_euros(base.watts, price)},
+                                                  "euros_par_an": baseline.yearly_euros(base.watts, price),
+                                                  # the cards (INTERFACE.md § 4.2): who draws at night, and since the first night
+                                                  "nuit": cards.night_devices(home, local.date(), base.watts, price, self.device_names),
+                                                  "evolution": cards.night_drift(nights, price)},
             "veille_hausse": None if rise is None else {"w": rise.watts, "reference": rise.reference, "depuis": rise.since.isoformat()},
             "heures_creuses": None if self.offpeak is None else [r.label() for r in self.offpeak.ranges],
             "contrat": {"option": self.contract.option, "kva": self.contract.kva, "prix": self.contract.prices,
-                        "revente": self.contract.export_price},
+                        "revente": self.contract.export_price,
+                        **cards.contract_month(home, self.contract, self.table, now, month)},
             "constats": [_finding(f, now) for f in [*home.findings, *self._against_reference(self.home_raw or home)]],
-            "heures": {"aujourdhui": _hours(home, local.date()), "hier": _hours(home, local.date() - timedelta(days=1))},
-            "veille_historique": _baseloads(home, local.date()),
+            "heures": {"aujourdhui": hours_today, "hier": _hours(home, local.date() - timedelta(days=1))},
+            "veille_historique": nights,
             "eau": _water(home, now),
             "panneaux": panels,
+            # The detail cards, one period each (maquette des cartes 2): the sun today, the devices today, the peak today.
+            "soleil_jour": {"plus_fort": cards.sun_today(hours_today), "prix_evite": avoided,
+                            "groupes": cards.panel_groups(channels, self.panel_names, self.tz, local.date())},
+            "appareils_jour": cards.devices_today(home, today, self.device_names),
+            "pointe": cards.peak_today(hours_today, kva),
             "a_savoir": self._know(today, yesterday, month, rise, price, self._unusual(home, local), panels),
             "mis_a_jour": now.isoformat(),
         }
@@ -718,7 +744,7 @@ def _water(home, now: datetime) -> dict | None:
     day_l, month_l = stats.total(reading.series, start, now).kwh, stats.total(reading.series, month, now).kwh
     price = reading.meter.price.number
     return {"jour_l": round(day_l), "mois_l": round(month_l), "mois_euros": None if price is None else round(month_l / 1000 * price, 2),
-            "prix_m3": price}
+            "prix_m3": price, **cards.water_days(reading.series, home.tz, now, price)}
 
 
 def _verdict(v: live.Verdict) -> dict:
@@ -730,6 +756,12 @@ def _friendly(hass, entity_id: str) -> str:
     """An entity's own name (« Sud CH1 Power » → the name the household gave), never its id when a name exists."""
     state = hass.states.get(entity_id)
     return (state.attributes.get("friendly_name") if state else None) or entity_id.split(".", 1)[-1]
+
+
+def _device_name(name: str) -> str:
+    """« Salon prise TV Énergie » → « Salon prise TV »: the device, without the meter's word."""
+    text = re.sub(r"[\s_-]*(énergie|energie|energy|consommation|conso|total)$", "", name.strip(), flags=re.I).replace("_", " ")
+    return (text[:1].upper() + text[1:]) if text else name
 
 
 def _hourly(imports, now: datetime) -> bool:

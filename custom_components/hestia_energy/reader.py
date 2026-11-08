@@ -150,7 +150,9 @@ def pellet_tracking(hass: HomeAssistant) -> dict | None:
 
     stock = roles.get("stock")
     return {"consumed": roles["consomme_kg"].entity_id, "season_kg": number("consomme_kg"), "spent_eur": number("depense"), "bought_kg": number("achete_kg"),
-            "bag_kg": stock.attributes.get("poids_sac_kg") if stock else None}
+            "bag_kg": stock.attributes.get("poids_sac_kg") if stock else None,
+            # what is left, and the days the stove was used this season (its pace)
+            "stock_kg": number("stock"), "days_used": number("jours_utilisation")}
 
 
 def origins(hass: HomeAssistant, stats: list[str]) -> dict[str, dict]:
