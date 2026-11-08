@@ -1,0 +1,101 @@
+{
+  "title": "Hestia Energy",
+  "config": {
+    "step": {
+      "user": {
+        "title": "Activer Hestia Énergie",
+        "description": "Hestia Énergie lit la page Énergie de Home Assistant ; elle ne commande rien.\n\n**Il lui faut au moins une source de consommation électrique** dans la [page Énergie]({energy}), peu importe laquelle. Les plus courantes :\n- [HA Linky]({ha_linky}) : sans matériel, la consommation de la veille ;\n- [MyElectricalData]({myelectricaldata}) : sans matériel, la consommation de la veille ;\n- [un module sur le Linky]({tic}) (LiXee / ZLinky, linkytic) : la consommation en direct.\n\nTout autre compteur déclaré dans la page Énergie convient aussi."
+      }
+    },
+    "abort": {
+      "already_configured": "Hestia Énergie est déjà activée. Tout se règle dans l’onglet Énergie du panneau Hestia-FB."
+    },
+    "error": {
+      "no_source": "Aucune source de consommation dans la page Énergie. Ajoutez-en une, puis validez de nouveau."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Hestia Énergie",
+        "description": "Tout se règle dans l’onglet Énergie du panneau Hestia-FB.\n\n[Ouvrir l’onglet Énergie]({link})",
+        "submit": "Fermer"
+      }
+    }
+  },
+  "entity": {
+    "sensor": {
+      "puissance_maison": {
+        "name": "Puissance de la maison"
+      },
+      "puissance_max_autorisee": {
+        "name": "Puissance maximale autorisée"
+      },
+      "prix_du_moment": {
+        "name": "Prix du moment"
+      },
+      "periode": {
+        "name": "Période",
+        "state": {
+          "hp": "Heures pleines",
+          "hc": "Heures creuses",
+          "base": "Base"
+        }
+      },
+      "cout_du_jour": {
+        "name": "Coût du jour"
+      },
+      "cout_du_mois": {
+        "name": "Coût du mois"
+      },
+      "part_du_soleil": {
+        "name": "Part du soleil"
+      },
+      "conseil": {
+        "name": "Conseil"
+      },
+      "couleur": {
+        "name": "Couleur du conseil",
+        "state": {
+          "bleu": "Bleu",
+          "vert": "Vert",
+          "orange": "Orange",
+          "rouge": "Rouge"
+        }
+      },
+      "veille": {
+        "name": "Veille de nuit"
+      },
+      "couleur_tempo": {
+        "name": "Couleur Tempo",
+        "state": {
+          "bleu": "Bleu",
+          "blanc": "Blanc",
+          "rouge": "Rouge"
+        }
+      },
+      "couleur_tempo_demain": {
+        "name": "Couleur Tempo de demain",
+        "state": {
+          "bleu": "Bleu",
+          "blanc": "Blanc",
+          "rouge": "Rouge"
+        }
+      }
+    },
+    "binary_sensor": {
+      "heures_creuses": {
+        "name": "Heures creuses"
+      },
+      "surplus": {
+        "name": "Soleil en trop"
+      },
+      "pointe_proche": {
+        "name": "Pointe proche du disjoncteur"
+      },
+      "donnee_douteuse": {
+        "name": "Donnée douteuse"
+      }
+    }
+  }
+}

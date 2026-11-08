@@ -1,0 +1,742 @@
+"""The home's energy, kept up to date: reports from the statistics every hour, the banner from the live states.
+
+Two rhythms (README of the socle: nothing long on Home Assistant's loop):
+- every hour (and when the Energy page changes), the statistics of the page's meters are read and the engine builds
+  the reports in a worker thread: the whole year at the start and once a day, the last three days otherwise;
+- on every change of a live entity (at most every 10 s) and every minute, the live arbiter and the banner.
+Everything the entities, the interface and the websocket show is in `self.data`, one dict, never recomputed by them.
+"""
+from __future__ import annotations
+
+import asyncio
+import dataclasses
+from datetime import date, datetime, timedelta
+import logging
+from zoneinfo import ZoneInfo
+
+from homeassistant.const import EVENT_HOMEASSISTANT_STARTED
+from homeassistant.core import Event, HomeAssistant, callback
+from homeassistant.helpers.event import async_call_later, async_track_state_change_event, async_track_time_interval
+from homeassistant.helpers.storage import Store
+from homeassistant.util import dt as dt_util
+
+from . import reader
+from .const import DOMAIN
+from .engine import advice, anomaly, baseline, health, heating, solar, home as engine_home, live, phrases, report, sources, stats, tariff
+
+_LOGGER = logging.getLogger(__name__)
+YEAR_DAYS = 400
+RECENT_DAYS = 3
+FULL_EVERY = timedelta(hours=24)
+LIVE_MIN_S = 10
+# The household's settings with their defaults (rule: what depends on the home is a setting, never a constant).
+DEFAULTS = {"kva": None, "option": None, "margin": 0.1, "watched": {"seche_serviettes": 24}, "export_price": None,
+            # the pellet bag (€), when Suivi Stock Pellet has no purchase to price the kilo from
+            "bag_price": None,
+            # the off-peak hours as typed (« 22:00-06:00 »), used when no meter shows them
+            "offpeak": None,
+            # 2.9: the reviews sent by a notify service of Home Assistant, at this hour; None: no notification (default)
+            "notify_service": None, "notify_hour": 8}
+
+
+class EnergyCoordinator:
+    def __init__(self, hass: HomeAssistant, entry) -> None:
+        self.hass = hass
+        self.entry = entry
+        self.tz = ZoneInfo(hass.config.time_zone)
+        self.table: dict = {}
+        self.store = Store(hass, 1, f"{DOMAIN}.settings")
+        # Each past day's cold (degree-days from Hestia Weather): a past day never changes, so it is kept.
+        self.cold_store = Store(hass, 1, f"{DOMAIN}.cold")
+        # The Tempo colour of each day seen (the Recorder forgets them after ten days, the bills need them all).
+        self.colour_store = Store(hass, 1, f"{DOMAIN}.tempo")
+        self.colours: dict[date, str] = {}
+        self.cold: dict[date, float] = {}
+        self.weather_cold = "non"
+        self._sent_on: date | None = None
+        self.panel_names: dict[str, str] = {}
+        self.run_limits: dict[str, int] = {}     # 5.2: each device's learned « on for too long »
+        self.run_hours: dict[str, int] = {}
+        self.reference: dict[str, str] = {}
+        self.home_raw: engine_home.Home | None = None   # the page's meters as they are, before following Enedis      # « achats » / « revente » → Enedis's statistic (HA Linky…)      # its whole hours on in a row, up to the last statistics hour
+        self.inverter_silent: float | None = None
+        self.settings = dict(DEFAULTS)
+        self.page: sources.EnergyPage | None = None
+        self.level: sources.Level | None = None
+        self.extras: dict = {}
+        self.rows: dict[str, list[dict]] = {}
+        self.home: engine_home.Home | None = None
+        self.offpeak: tariff.OffPeak | None = None
+        self.contract: tariff.Contract | None = None
+        self.locality: dict[str, bool | None] = {}
+        self.steady = advice.Steady()
+        self.flow = live.Flow()
+        self.data: dict = {"pret": False}
+        self._listeners: list = []
+        self._unsubs: list = []
+        self._live_unsub = None
+        self._last_full: datetime | None = None
+        self._live_pending = None
+        self._refreshing = asyncio.Lock()
+
+    # --- life ---------------------------------------------------------------------------------------------------
+
+    async def async_prepare(self) -> None:
+        """The Energy page and the extensions, read quickly before the entities are made: which ones exist (the level
+        reached) is decided here; their values come with the first reports, in the background."""
+        self.settings.update(await self.store.async_load() or {})
+        kept = await self.cold_store.async_load() or {}
+        self.cold = {date.fromisoformat(d): v for d, v in kept.items()}
+        self.colours = {date.fromisoformat(d): c for d, c in (await self.colour_store.async_load() or {}).items()}
+        # The regulated tariffs embedded in the brick: a file, read in a worker thread (never on the loop).
+        self.table = await self.hass.async_add_executor_job(tariff.load_regulated)
+        self.page = sources.read_page(await reader.energy_prefs(self.hass))
+        self.extras = reader.detect(self.hass)
+        self.level = sources.equipment(self.page)
+        self.data["source"] = self._source()
+        periods = {m.period for m in self.page.imports}
+        self.extras["prevision"] = any(m.forecasts for m in self.page.solar)
+        self.data.update({"equipement": _level(self.level), "extensions": dict(self.extras), "marge": self.settings["margin"],
+                          "contrat": {"option": self.settings.get("option") or ("hphc" if {"hp", "hc"} <= periods
+                                                                                else "base" if self.page.imports else None)}})
+
+    async def async_start(self) -> None:
+        await reader.listen_prefs(self.hass, self._prefs_changed)
+        # The meter's period (TIC), the inverters, the pellets come from integrations that may publish their entities
+        # after this one starts: looked for again once Home Assistant has started, and five minutes later.
+        fired = []
+
+        async def again(_event=None) -> None:
+            if _event is not None:
+                fired.append(True)
+            await self.async_refresh(full=False)
+
+        if not self.hass.is_running:
+            remove = self.hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STARTED, again)
+            # a listener heard once is gone: removing it again at unload would be an error
+            self._unsubs.append(lambda: None if fired else remove())
+        self._unsubs.append(async_call_later(self.hass, 300, again))
+        self._unsubs.append(async_track_time_interval(self.hass, self._hourly, timedelta(hours=1)))
+        self._unsubs.append(async_track_time_interval(self.hass, self._minute, timedelta(minutes=1)))
+        self.hass.async_create_background_task(self.async_refresh(full=True), f"{DOMAIN}_first_reports")
+
+    async def async_stop(self) -> None:
+        for unsub in self._unsubs:
+            unsub()
+        if self._live_unsub:
+            self._live_unsub()
+        if self._live_pending:
+            self._live_pending()
+        self._unsubs.clear()
+
+    def add_listener(self, update):
+        self._listeners.append(update)
+        return lambda: self._listeners.remove(update) if update in self._listeners else None
+
+    def _notify(self) -> None:
+        for update in list(self._listeners):
+            update()
+
+    async def _prefs_changed(self) -> None:
+        await self.async_refresh(full=True)
+
+    async def _hourly(self, _now=None) -> None:
+        full = self._last_full is None or dt_util.utcnow() - self._last_full >= FULL_EVERY
+        await self.async_refresh(full=full)
+
+    async def _minute(self, _now=None) -> None:
+        self._update_live()
+        await self._send_reviews()
+
+    async def _send_reviews(self) -> None:
+        """Every morning at the chosen hour: yesterday's review; on Mondays last week's too, on the 1st last month's.
+        Only when the household chose a notify service; once a day; another integration's trouble never stops this one."""
+        service = self.settings.get("notify_service")
+        local = dt_util.now(self.tz)
+        if not service or local.hour != self.settings.get("notify_hour", 8) or self._sent_on == local.date():
+            return
+        wanted = {"hier"} | ({"semaine"} if local.weekday() == 0 else set()) | ({"mois"} if local.day == 1 else set())
+        reviews = [r for r in self.data.get("bilans") or [] if r["id"] in wanted]
+        if not reviews:
+            return
+        self._sent_on = local.date()
+        name = service.split(".", 1)[-1]
+        for review in reviews:
+            try:
+                await self.hass.services.async_call("notify", name, {"title": review["titre"], "message": review["texte"]},
+                                                    blocking=False)
+            except Exception as err:  # noqa: BLE001
+                _LOGGER.warning("Review not sent by notify.%s: %s", name, err)
+                return
+
+    async def async_save_settings(self, changes: dict) -> None:
+        self.settings.update(changes)
+        await self.store.async_save(self.settings)
+        await self.async_refresh(full=False)
+
+    # --- the reports (every hour) -------------------------------------------------------------------------------
+
+    async def async_refresh(self, full: bool) -> None:
+        async with self._refreshing:
+            prefs = await reader.energy_prefs(self.hass)
+            self.page = sources.read_page(prefs)
+            self.extras = reader.detect(self.hass)
+            self.extras["prevision"] = any(m.forecasts for m in self.page.solar)
+            # The other bricks, as Home Assistant has loaded them (never guessed from entity names).
+            self.extras["meteo"] = "hestia_weather" in self.hass.config.components
+            self.extras["confort"] = "hestia_comfort" in self.hass.config.components
+            self.data["source"] = self._source()
+            ids = {m.stat for m in self.page.meters}
+            ids |= {e for m in self.page.meters for e in m.power.entities}
+            ids |= set(self.extras["channels"])
+            if self.extras.get("pellets"):
+                ids.add(self.extras["pellets"]["consumed"])
+            # Enedis (fait foi) when HA Linky or MyElectricalData imports it, and it is not the page's own meter.
+            in_page = {m.stat for m in self.page.meters}
+            self.reference = {k: v for k, v in (await reader.reference_statistics(self.hass)).items() if v not in in_page}
+            ids |= set(self.reference.values())
+            now = dt_util.utcnow()
+            meta = await reader.metadata(self.hass, ids)
+            self.level = sources.equipment(self.page, meta)
+            start = now - timedelta(days=YEAR_DAYS if full or not self.rows else RECENT_DAYS)
+            fresh = await reader.hourly(self.hass, ids, start)
+            self.rows = fresh if full or not self.rows else _merge(self.rows, fresh, start)
+            if full:
+                self._last_full = now
+            kva = self.settings.get("kva") or self.extras.get("kva")
+            first = now - timedelta(days=YEAR_DAYS)
+            self.home = await self.hass.async_add_executor_job(
+                engine_home.build, self.page, self.rows, self.tz, first, kva, self.extras["channels"])
+            # Enedis fait foi (Frank, 7 Nov. 2026): the bills follow its day totals when HA Linky brings them; the
+            # page's own meters are kept to be checked against it.
+            self.home_raw = self.home
+            self.home = await self.hass.async_add_executor_job(self._follow_enedis, self.home)
+            imports = self.home.of("import")
+            peak = next((r.series for r in imports if r.meter.period == "hp"), None)
+            offpeak = next((r.series for r in imports if r.meter.period == "hc"), None)
+            self.offpeak = tariff.learn_offpeak(peak, offpeak, self.tz) if peak and offpeak else None
+            # One meter only (HA Linky, a single Linky index): the off-peak hours the household typed.
+            if self.offpeak is None:
+                self.offpeak = tariff.parse_offpeak(self.settings.get("offpeak"))
+            # Hour by hour is proven by the statistics: HA Linky gives its older days in one step each (F1.2).
+            if self.level and not self.level.hourly:
+                self.level = dataclasses.replace(self.level, hourly=_hourly(imports, now))
+            for meter in self.page.meters:
+                for entity in meter.power.entities:
+                    if entity not in self.locality:
+                        self.locality[entity] = await reader.is_local(self.hass, entity)
+            if self.extras.get("inverter") and self.extras["inverter"] not in self.locality:
+                self.locality[self.extras["inverter"]] = await reader.is_local(self.hass, self.extras["inverter"])
+            await self._fetch_cold(now)
+            await self._fetch_colours(now)
+            self._follow_live()
+            prices, export_price = self._prices(), self._export_price()
+            self.panel_names = {c: solar.panel_name(_friendly(self.hass, c)) for c in self.extras["channels"]}
+            self.inverter_silent = self._inverter_silent()
+            self.weather_cold = reader.weather_cold(self.hass)
+            self.data.update(await self.hass.async_add_executor_job(self._reports, now, prices, export_price))
+            self.data["pret"] = True
+        self._update_live()
+
+    async def _fetch_colours(self, now: datetime) -> None:
+        """The Tempo days' colours: what the Recorder still has, added to those already kept."""
+        entity = self.extras.get("tempo_today")
+        if not entity:
+            return
+        found = await reader.colour_history(self.hass, entity, now - timedelta(days=11))
+        new = {d: c for d, c in found.items() if self.colours.get(d) != c}
+        if new:
+            self.colours.update(new)
+            await self.colour_store.async_save({d.isoformat(): c for d, c in self.colours.items()})
+
+    async def _fetch_cold(self, now: datetime) -> None:
+        """The degree-days of the year from Hestia Weather: the past days missing, and today (still a forecast)."""
+        if reader.weather_cold(self.hass) != "oui":
+            return
+        today = now.astimezone(self.tz).date()
+        first = today - timedelta(days=YEAR_DAYS)
+        wanted = [first + timedelta(days=i) for i in range((today - first).days + 1)]
+        missing = [d for d in wanted if d not in self.cold or d == today]
+        found = await reader.degree_days(self.hass, missing)
+        past = {d: v for d, v in found.items() if d < today and d not in self.cold}
+        self.cold.update(found)
+        if past:
+            await self.cold_store.async_save({d.isoformat(): v for d, v in self.cold.items() if d < today})
+
+    def _source(self) -> dict:
+        """The consumption source (D21): which meters the page buys with, where each comes from, and the official
+        sources to show when there is none."""
+        names = {s["type"]: s["nom"] for s in sources.OFFICIAL}
+        found = reader.origins(self.hass, [m.stat for m in self.page.imports]) if self.page else {}
+        meters = []
+        for meter in self.page.imports if self.page else []:
+            origin = found.get(meter.stat) or {}
+            kind = sources.source_of(meter.stat, origin.get("platform"), origin.get("device"))
+            meters.append({"type": kind, "stat": meter.stat, "periode": meter.period,
+                           "nom": names.get(kind) or origin.get("maker") or origin.get("integration") or "Compteur de la page Énergie"})
+        return {"compteurs": meters, "direct": bool(self.extras and self.extras.get("period")) or any(m["type"] == sources.TIC for m in meters),
+                "officielles": list(sources.OFFICIAL)}
+
+    def _heating(self, home, local: datetime, month, weather: str) -> dict:
+        """The heating estimated from the cold (9.2): one figure for this month and one for last winter, or why not."""
+        stove = self._stove(local)
+        if weather != "oui":
+            return {"etat": "sans_meteo" if weather == "non" else "meteo_ancienne", "poele": stove}
+        used = home.used_days()
+        learned = heating.learn(used, self.cold)
+        if learned is None:
+            return {"etat": "apprend", "jours": sum(1 for d in used if d in self.cold), "poele": stove}
+        if not learned.reliable:
+            return {"etat": "peu_lie", "poele": stove}
+        today = local.date()
+        this_month = heating.over(learned, self.cold, today.replace(day=1), today, month.bought_kwh, month.energy_eur)
+        # Last winter: October to April before this one (the heating season), at its own prices.
+        year = today.year if today.month >= 10 else today.year - 1
+        start, end = date(year - 1, 10, 1), date(year, 4, 30)
+        winter_report = report.period(home, self.contract, self.table, tariff.day_bounds(start, self.tz)[0],
+                                      tariff.day_bounds(end, self.tz)[1])
+        winter = heating.over(learned, self.cold, start, end, winter_report.bought_kwh, winter_report.energy_eur)
+        return {"etat": "pret", "mois": None if this_month is None else this_month.as_dict(),
+                # A winter only shown nearly whole (9 days in 10): a part of it would look like a cheap winter.
+                "hiver_dernier": None if winter is None or winter.days < 0.9 * ((end - start).days + 1) else {**winter.as_dict(), "du": start.isoformat(),
+                                                                                    "au": end.isoformat()},
+                "par_degre_kwh": round(learned.per_degree_kwh, 2), "poele": stove}
+
+    def _stove(self, local: datetime) -> dict | None:
+        """The pellet stove this month and this season (from October), in kilos and euros (9.1)."""
+        found = self.extras.get("pellets") if self.extras else None
+        if not found:
+            return None
+        rows = self.rows.get(found["consumed"])
+        per_kg = heating.price_per_kg(found.get("spent_eur"), found.get("bought_kg"), self.settings.get("bag_price"),
+                                      found.get("bag_kg"))
+        now = local
+        month_start = datetime.combine(now.date().replace(day=1), datetime.min.time(), self.tz)
+        season_year = now.year if now.month >= 10 else now.year - 1
+        season_start = datetime(season_year, 10, 1, tzinfo=self.tz)
+        if rows:
+            series = stats.energy(found["consumed"], rows)
+            month = heating.pellets(stats.total(series, month_start, now).kwh, per_kg)
+            season = heating.pellets(stats.total(series, season_start, now).kwh, per_kg)
+        else:
+            # No statistics kept for it: the season's total Suivi Stock Pellet shows (it starts again each October).
+            month, season = None, heating.pellets(found.get("season_kg"), per_kg)
+        if season is None:
+            return None
+        return {"mois": None if month is None else month.as_dict(), "saison": season.as_dict(), "prix_kg": None if per_kg is None else round(per_kg, 3),
+                "sac_kg": found.get("bag_kg")}
+
+    def _prices(self) -> dict:
+        """The prices the Energy page gives now (an entity or a number), per period."""
+        prices = {}
+        for meter in self.page.imports if self.page else []:
+            value = _number(self.hass.states.get(meter.price.entity)) if meter.price.entity else meter.price.number
+            if value is not None:
+                prices[meter.period or ("base" if len(self.page.imports) == 1 else "hp")] = value
+        return prices
+
+    def _export_price(self) -> float | None:
+        if self.settings.get("export_price") is not None:
+            return self.settings["export_price"]
+        for meter in self.page.exports if self.page else []:
+            value = _number(self.hass.states.get(meter.price.entity)) if meter.price.entity else meter.price.number
+            if value is not None:
+                return value
+        return None
+
+    def _reports(self, now: datetime, prices: dict, export_price: float | None) -> dict:
+        """Everything the reports say (worker thread: plain Python only, no state read)."""
+        home = self.home
+        kva = self.settings.get("kva") or self.extras.get("kva")
+        # A home showing the Tempo colour is on Tempo unless the household says otherwise.
+        option = self.settings.get("option") or (tariff.TEMPO if self.extras.get("tempo_today") else None)
+        self.contract = report.contract_for(home, kva, self.offpeak, prices, export_price, option)
+        self.contract.colors = dict(self.colours)
+        local = now.astimezone(self.tz)
+        # The page's prices are today's (Tarif EDF): on the regulated tariff, every past day keeps its own price.
+        if tariff.regulated_today(self.contract, self.table, local.date()):
+            self.contract.prices = {}
+        today = report.day(home, self.contract, self.table, local.date())
+        yesterday = report.day(home, self.contract, self.table, local.date() - timedelta(days=1))
+        month = report.month(home, self.contract, self.table, local.year, local.month, now)
+        base = baseline.baseload(home.bought, self.tz) if home.bought else None
+        rise = baseline.rise(home.bought, self.tz, local.date()) if home.bought and base else None
+        self._learn_runs()
+        heat = self._heating(home, local, month, self.weather_cold)
+        panels = self._panels(local)
+        if self.contract.option == tariff.HPHC:
+            price = baseline.average_price(self._price_of("hp", now), self._price_of("hc", now))
+        else:
+            price = self._price_of("base", now)
+        return {
+            "palier": self.level.level if self.level else 0, "equipement": _level(self.level),
+            "extensions": dict(self.extras), "marge": self.settings["margin"],
+            "jour": today.as_dict(), "hier": yesterday.as_dict(), "mois": month.as_dict(),
+            # The same month a year ago, whole (2.2): its euros may be unknown (tariffs not in the table), its kWh not.
+            "mois_an_dernier": report.month(home, self.contract, self.table, local.year - 1, local.month).as_dict(),
+            "projection": report.projection(month, now),
+            "chauffage": heat,
+            "bilans": report.reviews(home, self.contract, self.table, now),
+            "jusqu_ici": report.so_far(home, self.contract, self.table, now),
+            "veille": None if base is None else {"w": base.watts, "nuits": base.nights,
+                                                  "euros_par_an": baseline.yearly_euros(base.watts, price)},
+            "veille_hausse": None if rise is None else {"w": rise.watts, "reference": rise.reference, "depuis": rise.since.isoformat()},
+            "heures_creuses": None if self.offpeak is None else [r.label() for r in self.offpeak.ranges],
+            "contrat": {"option": self.contract.option, "kva": self.contract.kva, "prix": self.contract.prices,
+                        "revente": self.contract.export_price},
+            "constats": [_finding(f, now) for f in [*home.findings, *self._against_reference(self.home_raw or home)]],
+            "heures": {"aujourdhui": _hours(home, local.date()), "hier": _hours(home, local.date() - timedelta(days=1))},
+            "veille_historique": _baseloads(home, local.date()),
+            "eau": _water(home, now),
+            "panneaux": panels,
+            "a_savoir": self._know(today, yesterday, month, rise, price, self._unusual(home, local), panels),
+            "mis_a_jour": now.isoformat(),
+        }
+
+    def _unusual(self, home, local: datetime):
+        """Yesterday, when it was an unusual day (5.1)."""
+        used = home.used_days()
+        learned = heating.learn(used, self.cold) if self.weather_cold == "oui" else None
+        return anomaly.check(local.date() - timedelta(days=1), used, learned, self.cold)
+
+    def _follow_enedis(self, home):
+        for kind, key in (("import", "achats"), ("export", "revente")):
+            stat = self.reference.get(key)
+            if stat and self.rows.get(stat):
+                home = engine_home.follow(home, kind, stats.energy(stat, self.rows[stat]))
+        return home
+
+    def _against_reference(self, home) -> list:
+        """The page's meters against Enedis's, which the bill follows (« fait foi »)."""
+        found = []
+        for what, series in (("vos achats", home.bought), ("votre revente", home.sent)):
+            stat = self.reference.get("achats" if "achats" in what else "revente")
+            rows = self.rows.get(stat) if stat else None
+            if series is None or not rows:
+                continue
+            reference = stats.days(stats.energy(stat, rows), self.tz)
+            found += health.against_reference(stat, what, stats.days(series, self.tz), reference)
+        return found
+
+    def _learn_runs(self) -> None:
+        limits, hours = {}, {}
+        for meter in self.page.devices if self.page else []:
+            rows = self.rows.get(meter.power.rate) if meter.power.rate else None
+            if not rows or advice.kind_of(meter.name, meter.stat) == "chauffage":   # its thermostat decides
+                continue
+            name = meter.name or meter.stat
+            if (limit := anomaly.run_limit(rows)) is not None:
+                limits[name] = limit
+            hours[name] = anomaly.trailing_hours(rows)
+        self.run_limits, self.run_hours = limits, hours
+
+    def _panels(self, local: datetime) -> dict | None:
+        """Each panel yesterday, those behind their usual share (5.5), the inverter silent in daylight."""
+        channels = {c: self.rows[c] for c in self.extras.get("channels") or [] if self.rows.get(c)}
+        if not channels:
+            return None
+        days = solar.channel_days(channels, self.tz)
+        yesterday = local.date() - timedelta(days=1)
+        name = lambda c: self.panel_names.get(c) or c  # noqa: E731
+        return {"hier": [{"nom": name(c), "kwh": round(k, 2)} for c, k in sorted((days.get(yesterday) or {}).items())],
+                "en_retrait": [{"nom": name(b.channel), "pourcent_de_moins": round((1 - b.ratio) * 100)}
+                               for b in solar.behind(days, yesterday)],
+                "onduleur_muet_min": None if self.inverter_silent is None else round(self.inverter_silent)}
+
+    def _inverter_silent(self) -> float | None:
+        """Minutes the inverter has not answered while the sun is well up (30 min at least to be said)."""
+        inverter = self.extras.get("inverter")
+        state = self.hass.states.get(inverter) if inverter else None
+        sun = self.hass.states.get("sun.sun")
+        if state is None or sun is None:
+            return None
+        up = sun.state == "above_horizon" and (sun.attributes.get("elevation") or 0) > 10
+        minutes = solar.silent_minutes(state.state, state.last_changed, dt_util.utcnow(), up)
+        return minutes if minutes is not None and minutes >= 30 else None
+
+    def _know(self, today, yesterday, month, rise, price, unusual=None, panels=None) -> list[dict]:
+        """« À savoir »: one line per rubric at most, each a sentence of PHRASES.md § 3."""
+        lines = []
+        if self.offpeak and self.offpeak.ranges:
+            labels = [x for r in self.offpeak.ranges[:2] for x in r.label()]
+            values = dict(zip(("h1", "h2", "h3", "h4"), labels))
+            lines.append({"rubrique": "geste", "id": "hc_plages", "texte": phrases.know("hc_plages", values)})
+        behind = (panels or {}).get("en_retrait") or []
+        if panels and panels.get("onduleur_muet_min"):
+            minutes = panels["onduleur_muet_min"]
+            duree = f"{minutes} min" if minutes < 120 else f"{round(minutes / 60)} h"
+            lines.append({"rubrique": "surveiller", "id": "onduleur_muet", "texte": phrases.know("onduleur_muet", {"duree": duree})})
+        elif behind:
+            lines.append({"rubrique": "surveiller", "id": "panneau_retrait", "texte": phrases.know("panneau_retrait", {
+                "nom": behind[0]["nom"], "pourcent": behind[0]["pourcent_de_moins"]})})
+        elif rise is not None and price is not None:
+            extra = baseline.yearly_euros(rise.watts - rise.reference, price)
+            lines.append({"rubrique": "surveiller", "id": "veille_hausse", "texte": phrases.know("veille_hausse", {
+                "logement": "la maison", "mois": phrases.month_name(rise.since.month), "euros": phrases.euros(extra)})})
+        elif unusual is not None and unusual.more:
+            per_kwh = yesterday.energy_eur / yesterday.bought_kwh if yesterday.energy_eur is not None and yesterday.bought_kwh else None
+            values = {"kwh": phrases.number(unusual.used_kwh, 0), "ecart": phrases.number(unusual.gap_kwh, 0)}
+            if per_kwh is not None:
+                values["euros"] = phrases.euros(unusual.gap_kwh * per_kwh)
+            key = "jour_plus_froid" if unusual.with_cold else "jour_plus"
+            lines.append({"rubrique": "surveiller", "id": key, "texte": phrases.know(key, values)})
+        elif any(f.id in phrases.TO_MEND for f in self.home.findings):
+            lines.append({"rubrique": "surveiller", "id": "capteur_douteux", "texte": phrases.know("capteur_douteux", {})})
+        if unusual is not None and not unusual.more:
+            lines.append({"rubrique": "appris", "id": "jour_moins",
+                          "texte": phrases.know("jour_moins", {"ecart": phrases.number(unusual.gap_kwh, 0)})})
+        elif yesterday.sun_kept is not None:
+            lines.append({"rubrique": "appris", "id": "soleil_garde",
+                          "texte": phrases.know("soleil_garde", {"pourcent": round(yesterday.sun_kept * 100)})})
+        for line in lines:
+            line["titre"] = phrases.KNOW_TITLES[line["rubrique"]]
+        return lines
+
+    def _price_of(self, period: str, at: datetime) -> float | None:
+        return tariff.price_at(self.contract, self.table, at, self.tz, None if period == "base" else period)
+
+    # --- live (every change, at most every 10 s, and every minute) ----------------------------------------------
+
+    def _follow_live(self) -> None:
+        entities = set()
+        for meter in self.page.meters:
+            entities |= set(meter.power.entities)
+        entities |= {e for e in (self.extras.get("period"), self.extras.get("tempo_today"), self.extras.get("tempo_tomorrow"),
+                                 self.extras.get("inverter")) if e}
+        if self._live_unsub:
+            self._live_unsub()
+        self._live_unsub = async_track_state_change_event(self.hass, sorted(entities), self._state_changed) if entities else None
+
+    @callback
+    def _state_changed(self, event: Event) -> None:
+        if self._live_pending is None:
+            self._live_pending = async_call_later(self.hass, LIVE_MIN_S, self._live_due)
+
+    @callback
+    def _live_due(self, _now) -> None:
+        self._live_pending = None
+        self._update_live()
+
+    def _reading(self, entity_id: str | None) -> live.Reading | None:
+        state = self.hass.states.get(entity_id) if entity_id else None
+        if state is None:
+            return None
+        return live.Reading(entity_id, state.state, state.attributes.get("unit_of_measurement"), state.last_changed, state.last_reported)
+
+    def _candidate(self, meters: list[sources.Meter], name: str, sign_of) -> live.Candidate | None:
+        parts = []
+        for meter in meters:
+            for entity, sign in sign_of(meter):
+                reading = self._reading(entity)
+                if reading is None:
+                    return None
+                parts.append((reading, sign))
+        if not parts:
+            return None
+        readings = [self.home.readings.get(m.stat) for m in meters] if self.home else []
+        local = [self.locality.get(r.entity_id) for r, _ in parts]
+        return live.Candidate(name, parts, local=all(local) if all(v is not None for v in local) else None,
+                              late=any(r is not None and r.lag for r in readings))
+
+    def _inverter(self) -> live.Candidate | None:
+        reading = self._reading(self.extras.get("inverter"))
+        if reading is None:
+            return None
+        return live.Candidate("Onduleurs (OpenDTU)", [(reading, 1)], local=self.locality.get(reading.entity_id))
+
+    @callback
+    def _update_live(self) -> None:
+        if not self.page or not self.data.get("pret"):
+            return
+        now = dt_util.utcnow()
+
+        def imports(m):
+            if m.power.rate:
+                return [(m.power.rate, -1 if m.power.inverted else 1)]
+            return [(m.power.rate_from, 1)] if m.power.rate_from else []
+
+        def exports(m):
+            if m.power.rate:
+                return [(m.power.rate, 1 if m.power.inverted else -1)]
+            return [(m.power.rate_to, 1)] if m.power.rate_to else []
+
+        grid = self._candidate(self.page.imports, "Page Énergie", imports)
+        sent = self._candidate(self.page.exports, "Page Énergie", exports)
+        sun = [c for c in (self._candidate(self.page.solar, "Page Énergie", lambda m: [(m.power.rate, 1)] if m.power.rate else []),
+                           self._inverter()) if c is not None]
+        verdicts = {"achat": live.judge("achat", [grid] if grid else [], now),
+                    "revente": live.judge("revente", [sent] if sent else [], now),
+                    "soleil": live.judge("soleil", sun, now)}
+        bought = _positive(verdicts["achat"].value)
+        exported = _positive(verdicts["revente"].value)
+        produced = _positive(verdicts["soleil"].value)
+        period = self._period(now)
+        change = tariff.next_change(self.offpeak, now, self.tz) if self.offpeak else None
+        running = []
+        for meter in self.page.devices:
+            reading = self._reading(meter.power.rate)
+            watts = reading.watts if reading else None
+            if watts is not None and watts >= 50:
+                kind = advice.kind_of(meter.name, meter.stat)
+                name = meter.name or meter.stat
+                # On since: its whole hours in the statistics, plus the hour under way (it runs now).
+                hours = self.run_hours.get(name, 0) + now.astimezone(self.tz).minute / 60
+                running.append(advice.Running(name, kind, watts, hours))
+        water = self.page.water[0] if self.page.water else None
+        flow_reading = self._reading(water.power.rate) if water else None
+        if flow_reading is not None:
+            try:
+                self.flow.update(float(flow_reading.state), now)
+            except ValueError:
+                pass
+        kva = self.contract.kva if self.contract else None
+        # The household's own limit for a kind (towel rail: 24 h), else the device's learned one (5.2).
+        watched = {r.name: self.settings["watched"].get(r.kind) or self.run_limits.get(r.name) for r in running
+                   if self.settings["watched"].get(r.kind) or self.run_limits.get(r.name)}
+        colour_now = colour_next = None
+        if self.extras.get("tempo_today"):
+            colour_now = reader.colour_of(getattr(self.hass.states.get(self.extras["tempo_today"]), "state", None))
+        if self.extras.get("tempo_tomorrow"):
+            colour_next = reader.colour_of(getattr(self.hass.states.get(self.extras["tempo_tomorrow"]), "state", None))
+        situation = advice.Situation(
+            now=now, tz=self.tz, period=period, next_change=change,
+            offpeak_end=change[0] if change and period == "hc" else None,
+            bought_w=bought, sent_w=exported, sun_w=produced, subscribed_w=kva * 1000 if kva else None, running=running,
+            export_price=self.contract.export_price if self.contract else None,
+            offpeak_price=self._price_of("hc", now) if self.contract and self.contract.option == tariff.HPHC else None,
+            water_leak_min=self.flow.minutes(now), water_litres_per_day=self.flow.litres_per_day if self.flow.since else None,
+            watched=watched)
+        banner = self.steady.update(advice.choose(situation), now)
+        price = None
+        if self.contract:
+            price = tariff.price_at(self.contract, self.table, now, self.tz, None if period in (None, "base") else period, colour_now)
+        heat_now = heating.now(reader.thermostats(self.hass))
+        self.data["direct"] = {
+            "achat_w": bought, "revente_w": exported, "soleil_w": produced,
+            "maison_w": None if bought is None else bought + (produced or 0.0) - (exported or 0.0),
+            "periode": period, "prochain_changement": None if not change else {"a": change[0].isoformat(), "periode": change[1]},
+            "prix": price, "couleur": colour_now, "couleur_demain": colour_next,
+            "en_marche": [{"nom": r.name, "type": r.kind, "w": round(r.watts)} for r in running],
+            "fuite": {"minutes": self.flow.minutes(now), "debit": self.flow.rate},
+            "chauffage": None if heat_now is None else heat_now.as_dict(price),
+            "bandeau": banner, "sources": {k: _verdict(v) for k, v in verdicts.items()}, "a": now.isoformat(),
+        }
+        self._notify()
+
+    def _period(self, now: datetime) -> str | None:
+        """The period from the meter (TIC) first, then the learned hours (3.1 arbiter)."""
+        state = self.hass.states.get(self.extras["period"]) if self.extras.get("period") else None
+        if state is not None and (period := reader.period_of(state.state)):
+            return period
+        if self.contract and self.contract.option == tariff.BASE:
+            return "base"
+        if self.offpeak is not None:
+            return "hc" if self.offpeak.contains(now, self.tz) else "hp"
+        return None
+
+
+def _merge(old: dict, fresh: dict, start: datetime) -> dict:
+    return {sid: [r for r in old.get(sid, []) if r["start"] < start] + fresh.get(sid, []) for sid in set(old) | set(fresh)}
+
+
+def _number(state) -> float | None:
+    try:
+        return float(state.state) if state is not None else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _positive(value: float | None) -> float | None:
+    return None if value is None else max(0.0, value)
+
+
+def _level(level: sources.Level | None) -> dict:
+    if level is None:
+        return {}
+    return {"facture": level.bill, "direct": level.live, "appareils": level.devices, "soleil": level.sun,
+            "heure_par_heure": level.hourly, "manque": list(level.missing)}
+
+
+def _plain(values: dict) -> dict:
+    out = {}
+    for key, value in values.items():
+        if isinstance(value, (datetime, date)):
+            out[key] = value.isoformat()
+        elif isinstance(value, list):
+            out[key] = [v.isoformat() if isinstance(v, (datetime, date)) else v for v in value]
+        else:
+            out[key] = value
+    return out
+
+
+def _finding(f, now: datetime | None = None) -> dict:
+    values = _plain(f.values)
+    ident = "p_capteur_fige_stats" if f.id == "p_capteur_fige" and "heures" in f.values else f.id
+    shown = dict(values)
+    if isinstance(f.values.get("date"), date):
+        d = f.values["date"]
+        shown["date"] = f"{d.day} {phrases.month_name(d.month)} {d.year}"
+    for key in ("valeur", "facteur", "page", "enedis"):
+        if isinstance(f.values.get(key), (int, float)):
+            shown[key] = phrases.number(f.values[key], 0 if abs(f.values[key]) >= (10 if key in ("page", "enedis") else 100) else 1)
+    mend = f.id in phrases.TO_MEND
+    if f.id == "p_capteur_fige" and isinstance(f.values.get("debut"), datetime) and now is not None:
+        # A sensor frozen long ago and moving again is history, not something to mend now.
+        mend = now - f.values["debut"] < timedelta(days=7)
+    return {"id": f.id, "stat": f.stat, "valeurs": values, "texte": phrases.panel(ident, shown), "niveau": "regler" if mend else "info"}
+
+
+def _hours(home, day: date) -> list[dict]:
+    """Each hour of a local day: bought, sun and sent (kWh), None where unknown."""
+    start, end = tariff.day_bounds(day, home.tz)
+    out = [{"h": h, "achat": None, "soleil": None, "revente": None} for h in range(24)]
+    for key, series in (("achat", home.bought), ("soleil", home.sun), ("revente", home.sent)):
+        for hour in series.hours if series else []:
+            if start <= hour.start < end and hour.kwh is not None:
+                out[hour.start.astimezone(home.tz).hour][key] = round(hour.kwh, 3)
+    return out
+
+
+def _baseloads(home, day: date, days: int = 30) -> list[dict]:
+    if home.bought is None:
+        return []
+    out = []
+    for k in range(days - 1, -1, -1):
+        b = baseline.baseload(home.bought, home.tz, day - timedelta(days=k))
+        if b is not None:
+            out.append({"jour": b.end.isoformat(), "w": b.watts})
+    return out
+
+
+def _water(home, now: datetime) -> dict | None:
+    reading = next(iter(home.of("water")), None)
+    if reading is None:
+        return None
+    local = now.astimezone(home.tz)
+    start, _ = tariff.day_bounds(local.date(), home.tz)
+    month = datetime(local.year, local.month, 1, tzinfo=home.tz)
+    day_l, month_l = stats.total(reading.series, start, now).kwh, stats.total(reading.series, month, now).kwh
+    price = reading.meter.price.number
+    return {"jour_l": round(day_l), "mois_l": round(month_l), "mois_euros": None if price is None else round(month_l / 1000 * price, 2),
+            "prix_m3": price}
+
+
+def _verdict(v: live.Verdict) -> dict:
+    return {"retenu": None if v.chosen is None else v.chosen.name, "valeur": v.value,
+            "ecartes": [{"source": c.name, "raison": why, "valeurs": _plain(values)} for c, why, values in v.set_aside]}
+
+
+def _friendly(hass, entity_id: str) -> str:
+    """An entity's own name (« Sud CH1 Power » → the name the household gave), never its id when a name exists."""
+    state = hass.states.get(entity_id)
+    return (state.attributes.get("friendly_name") if state else None) or entity_id.split(".", 1)[-1]
+
+
+def _hourly(imports, now: datetime) -> bool:
+    """At least a week of whole hours among the last four weeks (HA Linky: its last seven days come by the half-hour)."""
+    days = set()
+    for reading in imports:
+        for hour in reading.series.hours:
+            if hour.hours == 1 and hour.kwh is not None and now - hour.start <= timedelta(days=28):
+                days.add(hour.start.date())
+    return len(days) >= 7

@@ -1,0 +1,80 @@
+"""Bundled tab and Lovelace card: one installation, nothing to declare by hand.
+
+The settings live in the shared « Hestia-FB » panel (socle, see socle.py), as the « Énergie » tab, with the menu
+fixed in the specification (CAHIER-DES-CHARGES.md, G4).
+"""
+import hashlib
+from pathlib import Path
+
+from aiohttp import web
+from homeassistant.components.http import HomeAssistantView, StaticPathConfig
+
+from .const import DOMAIN, VERSION
+from .socle import async_register_brick, async_register_card
+
+ASSETS = "/hestia_energy-assets"
+CARD_FILE = "hestia-energy-card.js"
+CARD_URL = f"{ASSETS}/{CARD_FILE}"
+# The tab's menu (socle 1.20): [path, label, icon]. Icons from the socle's hubIcon(); its own energy icons come with the tab.
+MENU = [["", "Vue d’ensemble", "home"], ["sources", "Sources", "entities"], ["appareils", "Appareils", "light"],
+        ["contrat", "Contrat", "settings"], ["reglages", "Réglages", "settings"], ["extensions", "Extensions", "extensions"],
+        ["bilan", "Bilan", "review"], ["a-propos", "À propos", "info"]]
+
+
+class _LiveCardView(HomeAssistantView):
+    """A beta's card at its usual address, always checked again by the browser: a beta is rebuilt often."""
+    url = CARD_URL
+    name = "hestia_energy:live_card"
+    requires_auth = False
+
+    async def get(self, request):
+        return web.FileResponse(Path(__file__).parent / "frontend" / CARD_FILE, headers={"Cache-Control": "no-cache"})
+
+
+def _fingerprint(path):
+    try:
+        return hashlib.sha256(path.read_bytes()).hexdigest()[:8]
+    except OSError:
+        return None
+
+
+async def async_setup_panel(hass):
+    if not hass.http or not hasattr(hass.http, "async_register_static_paths"):
+        return  # Isolated tests and headless setups have no frontend.
+    if not hass.data.get(DOMAIN + "_panel_asset"):
+        beta = "b" in VERSION
+        if beta:
+            hass.http.register_view(_LiveCardView())
+        await hass.http.async_register_static_paths([StaticPathConfig(ASSETS, str(Path(__file__).parent / "frontend"), not beta)])
+        stamp = None if beta else await hass.async_add_executor_job(_fingerprint, Path(__file__).parent / "frontend" / CARD_FILE)
+        await async_register_card(hass, CARD_URL, f"{VERSION}-{stamp}" if stamp else f"{VERSION}-dev" if beta else VERSION)
+        hass.data[DOMAIN + "_panel_asset"] = True
+    await async_register_brick(hass, {
+        "domain": DOMAIN, "name": "Hestia Énergie", "slug": "energie", "tab": "Énergie", "version": VERSION,
+        "icon": "mdi:lightning-bolt-outline", "navigation": 3, "menu": MENU,
+        "module_url": f"{ASSETS}/panel.js?v={VERSION}", "element": "hestia-energy-setup", "status": energy_status,
+    }, f"{ASSETS}/hestia-socle.js?v={VERSION}")
+
+
+async def energy_status(hass, lang=None):
+    """What the Hestia-FB home page says about Hestia Energy, from its own state only."""
+    entries = hass.config_entries.async_entries(DOMAIN)
+    if not entries:
+        return {"level": "action", "summary": "Pas encore activée.", "details": [], "links": []}
+    coordinator = getattr(entries[0], "runtime_data", None)
+    data = coordinator.data if coordinator else {}
+    if not data.get("pret"):
+        return {"level": "unknown", "summary": "Lecture de la page Énergie en cours.", "details": [], "links": []}
+    if not (data.get("equipement") or {}).get("facture"):
+        return {"level": "action", "summary": "La page Énergie de Home Assistant n’a pas encore de compteur.",
+                "details": ["Ajoutez votre consommation dans Paramètres → Tableaux de bord → Énergie."], "links": []}
+    month = (data.get("mois") or {}).get("euros")
+    summary = f"Palier {data.get('palier', 0)}" + (f", {month:.0f} € ce mois." if month is not None else ".")
+    # Only what the household alone can mend is a « to do »; what Hestia set right by itself stays in its « Sources ».
+    mend = [c for c in data.get("constats") or [] if c.get("niveau") == "regler"]
+    if not mend:
+        return {"level": "ok", "summary": summary, "details": [], "links": []}
+    details = [c.get("texte") or c.get("id") for c in mend[:2]]
+    if len(mend) > 2:
+        details.append(f"Et {len(mend) - 2} autre(s) dans l’onglet Énergie.")
+    return {"level": "action", "summary": summary + f" {len(mend)} point(s) à régler.", "details": details, "links": []}

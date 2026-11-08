@@ -1,0 +1,26 @@
+{
+  "domain": "hestia_energy",
+  "name": "Hestia Energy",
+  "after_dependencies": [
+    "energy",
+    "hestia_comfort",
+    "hestia_weather",
+    "lovelace",
+    "recorder"
+  ],
+  "codeowners": [
+    "@hestiaFB"
+  ],
+  "config_flow": true,
+  "dependencies": [
+    "frontend",
+    "http",
+    "websocket_api"
+  ],
+  "documentation": "https://github.com/hestiaFB/hestia-energy-integration",
+  "integration_type": "service",
+  "iot_class": "calculated",
+  "issue_tracker": "https://github.com/hestiaFB/hestia-energy-integration/issues",
+  "requirements": [],
+  "version": "1.0.0b1"
+}

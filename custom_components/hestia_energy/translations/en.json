@@ -1,0 +1,101 @@
+{
+  "title": "Hestia Energy",
+  "config": {
+    "step": {
+      "user": {
+        "title": "Enable Hestia Energy",
+        "description": "Hestia Energy reads Home Assistant's Energy dashboard; it controls nothing.\n\n**It needs at least one electricity consumption source** in the [Energy dashboard]({energy}), whichever you like. The most common in France:\n- [HA Linky]({ha_linky}): no hardware, yesterday's consumption;\n- [MyElectricalData]({myelectricaldata}): no hardware, yesterday's consumption;\n- [a module on the Linky]({tic}) (LiXee / ZLinky, linkytic): live consumption.\n\nAny other meter declared in the Energy dashboard works too."
+      }
+    },
+    "abort": {
+      "already_configured": "Hestia Energy is already enabled. Everything is set in the Energy tab of the Hestia-FB panel."
+    },
+    "error": {
+      "no_source": "No consumption source in the Energy dashboard. Add one, then submit again."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Hestia Energy",
+        "description": "Everything is set in the Energy tab of the Hestia-FB panel.\n\n[Open the Energy tab]({link})",
+        "submit": "Close"
+      }
+    }
+  },
+  "entity": {
+    "sensor": {
+      "puissance_maison": {
+        "name": "Home power"
+      },
+      "puissance_max_autorisee": {
+        "name": "Maximum allowed power"
+      },
+      "prix_du_moment": {
+        "name": "Current price"
+      },
+      "periode": {
+        "name": "Tariff period",
+        "state": {
+          "hp": "Peak hours",
+          "hc": "Off-peak hours",
+          "base": "Base"
+        }
+      },
+      "cout_du_jour": {
+        "name": "Cost today"
+      },
+      "cout_du_mois": {
+        "name": "Cost this month"
+      },
+      "part_du_soleil": {
+        "name": "Solar share"
+      },
+      "conseil": {
+        "name": "Advice"
+      },
+      "couleur": {
+        "name": "Advice colour",
+        "state": {
+          "bleu": "Blue",
+          "vert": "Green",
+          "orange": "Orange",
+          "rouge": "Red"
+        }
+      },
+      "veille": {
+        "name": "Night baseload"
+      },
+      "couleur_tempo": {
+        "name": "Tempo colour",
+        "state": {
+          "bleu": "Blue",
+          "blanc": "White",
+          "rouge": "Red"
+        }
+      },
+      "couleur_tempo_demain": {
+        "name": "Tempo colour tomorrow",
+        "state": {
+          "bleu": "Blue",
+          "blanc": "White",
+          "rouge": "Red"
+        }
+      }
+    },
+    "binary_sensor": {
+      "heures_creuses": {
+        "name": "Off-peak hours"
+      },
+      "surplus": {
+        "name": "Solar surplus"
+      },
+      "pointe_proche": {
+        "name": "Peak near the breaker"
+      },
+      "donnee_douteuse": {
+        "name": "Doubtful data"
+      }
+    }
+  }
+}

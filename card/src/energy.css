@@ -1,0 +1,78 @@
+/* Hestia Énergie : seulement ses exceptions. Toute la structure (carte, bandeau, panneaux, valeurs, sections) vient de
+   hestia-charte.css ; ici le flux soleil / maison / réseau, les barres, les rubriques, la tuile et la carte de détail.
+   Couleurs de sens propres à l'énergie, prises dans la palette Aube (maquette du 7 nov.). */
+:host { --nw-sun:var(--nw-level1); --nw-grid:var(--nw-wind); --nw-home:var(--nw-heat); --nw-water:var(--nw-rain); --nw-fire:var(--nw-level2); display:block; }
+ha-card { padding:14px; display:flex; flex-direction:column; gap:12px; }
+.head { display:flex; align-items:baseline; gap:10px; padding:2px 4px 0; min-width:0; }
+.head .where { margin-left:auto; text-align:right; font-size:var(--nw-fs-small); color:var(--nw-fg2); white-space:nowrap; }
+.name { font-size:var(--nw-fs-title); font-weight:700; line-height:1.2; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.nw-panel-icon.tint { width:28px; height:28px; border-radius:9px; background:color-mix(in oklab, var(--c) 28%, transparent); color:color-mix(in oklab, var(--c) 60%, var(--nw-fg)); }
+.nw-panel-icon.tint svg { width:16px; height:16px; }
+
+/* La tuile : une phrase, un chiffre. */
+ha-card.tile { padding:14px 16px; gap:0; }
+.t-top { display:flex; gap:12px; align-items:flex-start; min-width:0; }
+.t-right { margin-left:auto; text-align:right; display:flex; flex-direction:column; align-items:flex-end; gap:2px; min-width:0; }
+.t-val { font-size:var(--nw-fs-value); font-weight:300; line-height:1.05; letter-spacing:-.04em; font-variant-numeric:tabular-nums; }
+.t-val small { font-size:var(--nw-fs-text); font-weight:500; color:var(--nw-fg2); margin-left:3px; letter-spacing:0; }
+.t-sub { font-size:var(--nw-fs-small); color:var(--nw-fg2); white-space:nowrap; }
+.ring { width:46px; height:46px; flex:none; border-radius:50%; display:grid; place-items:center; position:relative;
+  background:conic-gradient(var(--c) calc(var(--p) * 1%), color-mix(in srgb, var(--nw-fg) 9%, transparent) 0); }
+.ring::after { content:""; position:absolute; inset:5px; border-radius:50%; background:var(--nw-bg); }
+.ring svg { position:relative; z-index:1; width:20px; height:20px; color:color-mix(in oklab, var(--c) 60%, var(--nw-fg)); }
+.bubble { margin-top:12px; display:flex; gap:10px; align-items:center; padding:9px 12px; border-radius:12px; background:color-mix(in oklab, var(--c) 22%, var(--nw-bg)); font-weight:500; }
+.bubble svg { width:18px; height:18px; flex:none; color:color-mix(in oklab, var(--c) 55%, var(--nw-fg)); }
+.pastille { display:inline-flex; align-items:center; gap:6px; font-size:var(--nw-fs-small); font-weight:600; color:color-mix(in oklab, var(--c) var(--nw-ink), var(--nw-fg)); white-space:nowrap; }
+.pastille::before { content:""; width:8px; height:8px; border-radius:50%; background:var(--c); box-shadow:0 0 0 3px color-mix(in oklab, var(--c) 30%, transparent); }
+
+/* « À savoir ». */
+.know { display:grid; gap:8px; padding:0 4px; }
+.know .k { display:flex; gap:10px; align-items:baseline; }
+.know .k .nw-label { width:96px; flex:none; }
+
+/* Les sections et leurs panneaux. */
+.sec { border-top:1px solid var(--nw-line-soft); padding-top:12px; }
+.sec-body { display:grid; grid-template-columns:repeat(auto-fill, minmax(250px, 1fr)); gap:10px; margin-top:12px; }
+.nw-panel { display:flex; flex-direction:column; gap:8px; }
+.nw-panel.wide { grid-column:1 / -1; }
+.nw-panel-head .nw-badge { margin-left:auto; }
+.m-say { font-size:var(--nw-fs-text); }
+.m-foot { display:flex; justify-content:space-between; gap:4px 8px; font-size:var(--nw-fs-small); color:var(--nw-fg2); border-top:1px solid var(--nw-line-soft); padding-top:7px; flex-wrap:wrap; }
+.m-foot b { color:var(--nw-fg); font-weight:600; }
+.rows { display:grid; gap:6px; }
+.row { display:flex; align-items:center; gap:8px; } .row .v { margin-left:auto; font-weight:600; white-space:nowrap; } .row .muted { color:var(--nw-fg2); font-weight:400; }
+.empty { font-size:var(--nw-fs-small); color:var(--nw-fg2); border:1px dashed var(--nw-line); border-radius:10px; padding:8px 10px; }
+svg.chart { width:100%; height:auto; display:block; overflow:visible; }
+
+/* Flux soleil / maison / réseau. */
+.flow { display:grid; grid-template-columns:1fr auto 1fr auto 1fr; align-items:center; gap:4px; padding:4px 0; }
+.flow.two { grid-template-columns:1fr auto 1fr; }
+.flow .node { display:flex; flex-direction:column; align-items:center; gap:3px; text-align:center; }
+.flow .dot { width:52px; height:52px; border-radius:50%; display:grid; place-items:center; background:color-mix(in oklab, var(--c) 30%, var(--nw-bg)); border:2px solid color-mix(in oklab, var(--c) 70%, transparent); }
+.flow .dot svg { width:24px; height:24px; color:color-mix(in oklab, var(--c) 55%, var(--nw-fg)); }
+.flow .nv { font-weight:600; font-variant-numeric:tabular-nums; } .flow .nl { font-size:var(--nw-fs-label); text-transform:uppercase; letter-spacing:.6px; color:var(--nw-fg2); font-weight:700; }
+.flow .link { width:44px; height:4px; border-radius:2px; background:color-mix(in srgb, var(--nw-fg) 9%, transparent); position:relative; overflow:hidden; }
+.flow .link i { position:absolute; top:0; width:12px; height:4px; border-radius:2px; background:var(--c); animation:run 1.4s linear infinite; }
+.flow .link.rev i { animation-name:runr; } .flow .link.off i { display:none; }
+@keyframes run { from { left:-12px; } to { left:44px; } } @keyframes runr { from { left:44px; } to { left:-12px; } }
+
+/* Rubriques : encarts qu'on touche pour ouvrir la carte de détail. */
+.rubs { display:grid; grid-template-columns:repeat(auto-fill, minmax(200px, 1fr)); gap:10px; margin-top:12px; }
+.rub { display:flex; flex-direction:column; gap:6px; text-align:left; border:1px solid var(--nw-line); border-radius:var(--nw-radius);
+  background:linear-gradient(160deg, color-mix(in oklab, var(--c) 14%, var(--nw-bg)), var(--nw-bg) 70%); padding:12px 14px; cursor:pointer; min-width:0;
+  transition:transform .15s var(--nw-ease), border-color .2s; }
+.rub:hover { border-color:color-mix(in oklab, var(--c) 70%, var(--nw-line)); }
+.rub:active { transform:scale(.98); }
+.rub .r-h { display:flex; align-items:center; gap:8px; } .rub .r-h b { font-size:var(--nw-fs-text); font-weight:650; }
+.rub .r-go { margin-left:auto; color:var(--nw-fg2); font-size:18px; line-height:1; }
+.rub .r-v { font-size:var(--nw-fs-case); font-weight:600; line-height:1.1; } .rub .r-v small { font-size:var(--nw-fs-small); color:var(--nw-fg2); font-weight:500; margin-left:3px; }
+.rub .r-s { font-size:var(--nw-fs-small); color:var(--nw-fg2); }
+
+/* La carte de détail, par-dessus la page. */
+.ov { position:fixed; inset:0; z-index:10; display:flex; justify-content:center; align-items:flex-start; padding:24px 12px; background:color-mix(in srgb, #000 45%, transparent); overflow:auto; }
+.ov .sheet { width:min(860px, 100%); animation:up .3s var(--nw-ease); }
+@keyframes up { from { transform:translateY(16px); } to { transform:none; } }
+.d-close { margin-left:auto; width:36px; height:36px; border-radius:50%; border:1px solid var(--nw-line); background:var(--nw-bg); cursor:pointer; font-size:18px; line-height:1; }
+.d-say { margin:0 4px; }
+@media (prefers-reduced-motion:reduce) { .flow .link i, .ov .sheet, .rub { animation:none !important; transition:none; } }
+.nw-legend i { width:8px; height:8px; border-radius:50%; background:var(--c); flex:none; }
