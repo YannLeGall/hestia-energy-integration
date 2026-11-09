@@ -31,8 +31,9 @@ class Baseload:
     end: date
 
 
-def baseload(series: Series, tz: tzinfo, end: date | None = None) -> Baseload | None:
-    """The baseload of the 28 nights before `end` (included), or None with fewer than 14 nights of hourly data."""
+def baseload(series: Series, tz: tzinfo, end: date | None = None, min_nights: int = None) -> Baseload | None:
+    """The baseload of the 28 nights before `end` (included), or None with fewer than 14 nights of hourly data
+    (`min_nights`: fewer for the advice « à froid », HA Linky keeping its last seven days hour by hour)."""
     hours: list[tuple[date, float]] = []
     for hour in series.hours:
         if hour.kwh is None or hour.hours != 1:
@@ -45,7 +46,7 @@ def baseload(series: Series, tz: tzinfo, end: date | None = None) -> Baseload | 
     end = end or max(d for d, _ in hours)
     window = [(d, kwh) for d, kwh in hours if end - timedelta(days=WINDOW_DAYS) < d <= end]
     nights = len({d for d, _ in window})
-    if nights < MIN_NIGHTS:
+    if nights < (MIN_NIGHTS if min_nights is None else min_nights):
         return None
     values = sorted(kwh for _, kwh in window)
     return Baseload(round(values[int(len(values) * CENTILE)] * 1000), nights, end)

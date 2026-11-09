@@ -11,7 +11,7 @@ import re
 
 from homeassistant.components.recorder import get_instance, statistics
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers import device_registry as dr, entity_registry as er
+from homeassistant.helpers import area_registry as ar, device_registry as dr, entity_registry as er
 from homeassistant.loader import async_get_integration, async_get_loaded_integration
 
 _LOGGER = logging.getLogger(__name__)
@@ -104,6 +104,11 @@ def detect(hass: HomeAssistant) -> dict:
              "comwatt": False}
     for state in hass.states.async_all("sensor"):
         eid = state.entity_id
+        # Never its own sensors: « Période » (hp/hc) would pass for the meter's own, and a home with HA Linky only
+        # would look live (found on a Linky-only home, 9 Nov. 2026).
+        own = registry.async_get(eid)
+        if (own is not None and own.platform == "hestia_energy") or eid.startswith("sensor.hestia_energy_"):
+            continue
         if found["period"] is None and _PERIOD_STATE.match(state.state or "") and not _TEMPO.search(eid):
             found["period"] = eid
         if _TEMPO.search(eid) and colour_of(state.state):
@@ -158,12 +163,16 @@ def pellet_tracking(hass: HomeAssistant) -> dict | None:
 def origins(hass: HomeAssistant, stats: list[str]) -> dict[str, dict]:
     """Where each statistic comes from: its integration and its device's maker and model (« Comwatt », « LiXee
     ZLinky »). An imported statistic (« linky:… ») has neither; its prefix says it."""
-    entities, devices = er.async_get(hass), dr.async_get(hass)
+    entities, devices, areas = er.async_get(hass), dr.async_get(hass), ar.async_get(hass)
     out = {}
     for stat in stats:
         entry = entities.async_get(stat) if "." in stat and ":" not in stat else None
         device = devices.async_get(entry.device_id) if entry and entry.device_id else None
-        out[stat] = {"platform": entry.platform if entry else None,
+        # its room in Home Assistant: the entity's own, else its device's (the hub shows it, never uses it to sort)
+        area_id = (entry.area_id if entry else None) or (device.area_id if device else None)
+        area = areas.async_get_area(area_id) if area_id else None
+        out[stat] = {"platform": entry.platform if entry else None, "area": area.name if area else None,
+                     "device_name": (device.name_by_user or device.name) if device else None,
                      "maker": device.manufacturer if device else None,
                      "integration": _integration_name(hass, entry.platform) if entry else None,
                      "device": " ".join(x for x in (device.manufacturer, device.model) if x) if device else None}

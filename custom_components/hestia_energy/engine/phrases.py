@@ -41,6 +41,20 @@ BANNER = {
     "rien": (RIEN, "Rien à faire.", ""),
 }
 
+# « À froid » (Frank, 9 Nov. 2026): what to change in the habits or the contract, with the euros at stake; not the
+# banner's gestures of the moment (engine/daily.py). Each: the gesture, then why, with its figure.
+# The euros at stake are shown beside the gesture (maquette des cartes 3), « par an » or « par hiver ».
+PISTES = {
+    "jour_inhabituel": ("Regardez ce qui a tourné {jour}",
+                        "La maison a consommé {kwh} kWh au lieu de {habitude}[ pour ce froid][, {euros} € de plus].", None),
+    "contrat_base": ("Passez en option Base",
+                     "Seulement {part} % de vos achats tombent en heures creuses ; elles rapportent à partir de {seuil} % "
+                     "(mesuré sur {jours} jours).", "par an"),
+    "veille_haute": ("Cherchez ce qui tourne la nuit", "Quand tout dort, la maison consomme encore {w} W.", "par an"),
+    "chauffage_degre": ("Baissez le chauffage d'un degré", "Le chauffage fait environ {part} % de vos achats.", "par hiver"),
+    "budget_mois": ("Ce mois coûte plus que d'habitude",
+                    "Au rythme actuel, environ {euros} € : {ecart} € de plus qu'en {mois} dernier.", None),
+}
 # The tile's chip (PHRASES.md § 4): « Rien à faire », « À revoir », « Bon moment », « Demain rouge », « Urgent ».
 CHIP = {URGENT: "Urgent", GESTE: "À revoir", BENEFICE: "Bon moment", RIEN: "Rien à faire"}
 
@@ -113,6 +127,15 @@ PANEL = {
     "p_soleil_manquant": "La production n'a pas été mesurée {jours} jour(s) alors que les panneaux produisaient : ces jours-là n'ont pas de bilan complet.",
 }
 
+# The same, in the hub's card of the source or device it is about (H6): its name is the card's title, not repeated.
+SHORT = {
+    "p_capteur_fige_stats": "Sa puissance est restée à {valeur} {unite} pendant {heures} h alors que son compteur avançait.",
+    "p_compteur_saut": "A sauté jusqu'à {valeur} kWh en une heure, {fois} fois : ces heures sont écartées.",
+    "p_cloud_retard": "Arrive avec {duree_h} h de retard : gardé pour les bilans, pas pour le direct.",
+    "p_unite": "Compte en Wh, pas en kWh : Hestia le divise par {facteur}.",
+    "p_depuis": "N'existe que depuis le {date} : ses bilans commencent ce jour-là.",
+    "p_sans_statistiques": "N'a pas de statistiques : Home Assistant ne le garde pas dans le temps.",
+}
 _MONTHS = ("janvier", "février", "mars", "avril", "mai", "juin", "juillet", "août", "septembre", "octobre", "novembre", "décembre")
 
 
@@ -134,6 +157,17 @@ def euros(value: float) -> str:
     """PHRASES.md rule 7: € to the cent under 10 €, to the euro above."""
     text = f"{value:.2f}" if abs(value) < 10 else f"{value:.0f}"
     return text.replace(".", ",")
+
+
+def short(id: str, values: dict) -> str | None:
+    """The finding in the card of its source or device, else its panel sentence."""
+    template = SHORT.get(id)
+    if template is None:
+        return panel(id, values)
+    try:
+        return fill(template, values)
+    except (KeyError, ValueError, IndexError):
+        return panel(id, values)
 
 
 def panel(id: str, values: dict) -> str | None:

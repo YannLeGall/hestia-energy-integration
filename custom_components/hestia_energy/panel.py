@@ -8,17 +8,20 @@ from pathlib import Path
 
 from aiohttp import web
 from homeassistant.components.http import HomeAssistantView, StaticPathConfig
+from homeassistant.util import dt as dt_util
 
 from .const import DOMAIN, VERSION
-from .socle import async_register_brick, async_register_card
+from .socle import KEY as SOCLE_KEY, async_register_brick, async_register_card
 
 ASSETS = "/hestia_energy-assets"
 CARD_FILE = "hestia-energy-card.js"
 CARD_URL = f"{ASSETS}/{CARD_FILE}"
 # The tab's menu (socle 1.20): [path, label, icon]. Icons from the socle's hubIcon(); its own energy icons come with the tab.
+# The page Contrat is gone: its settings are in Réglages (INTERFACE.md § 5, H1). Appareils is hidden without devices.
 MENU = [["", "Vue d’ensemble", "home"], ["sources", "Sources", "entities"], ["appareils", "Appareils", "light"],
-        ["contrat", "Contrat", "settings"], ["reglages", "Réglages", "settings"], ["extensions", "Extensions", "extensions"],
+        ["reglages", "Réglages", "settings"], ["extensions", "Extensions", "extensions"],
         ["bilan", "Bilan", "review"], ["a-propos", "À propos", "info"]]
+MENU_NO_DEVICES = [item for item in MENU if item[0] != "appareils"]
 
 
 class _LiveCardView(HomeAssistantView):
@@ -63,18 +66,26 @@ async def energy_status(hass, lang=None):
         return {"level": "action", "summary": "Pas encore activée.", "details": [], "links": []}
     coordinator = getattr(entries[0], "runtime_data", None)
     data = coordinator.data if coordinator else {}
+    # Appareils only when the Energy page has devices (H1): the socle reads the menu after asking the status.
+    brick = hass.data.get(SOCLE_KEY, {}).get("bricks", {}).get(DOMAIN)
+    if brick is not None and coordinator is not None and coordinator.page is not None:
+        brick["menu"] = MENU if coordinator.page.devices else MENU_NO_DEVICES
     if not data.get("pret"):
         return {"level": "unknown", "summary": "Lecture de la page Énergie en cours.", "details": [], "links": []}
     if not (data.get("equipement") or {}).get("facture"):
         return {"level": "action", "summary": "La page Énergie de Home Assistant n’a pas encore de compteur.",
                 "details": ["Ajoutez votre consommation dans Paramètres → Tableaux de bord → Énergie."], "links": []}
+    # The hub's « À régler » (INTERFACE.md § 5, H2): the same list as the tab's overview; « palier » is no longer said.
+    from . import hub_view
+    from .engine import phrases
+    mend = hub_view.todos(hass, coordinator)
     month = (data.get("mois") or {}).get("euros")
-    summary = f"Palier {data.get('palier', 0)}" + (f", {month:.0f} € ce mois." if month is not None else ".")
-    # Only what the household alone can mend is a « to do »; what Hestia set right by itself stays in its « Sources ».
-    mend = [c for c in data.get("constats") or [] if c.get("niveau") == "regler"]
+    first = phrases.month_name(dt_util.now().month)
+    summary = f"{phrases.euros(month)} € depuis le 1er {first}." if month is not None else "Les euros arrivent avec les premiers bilans."
     if not mend:
         return {"level": "ok", "summary": summary, "details": [], "links": []}
-    details = [c.get("texte") or c.get("id") for c in mend[:2]]
+    details = [t["titre"] for t in mend[:2]]
     if len(mend) > 2:
-        details.append(f"Et {len(mend) - 2} autre(s) dans l’onglet Énergie.")
-    return {"level": "action", "summary": summary + f" {len(mend)} point(s) à régler.", "details": details, "links": []}
+        details.append(f"Et {len(mend) - 2} autre{'s' if len(mend) > 3 else ''} dans l’onglet Énergie.")
+    return {"level": "action", "summary": summary + f" {len(mend)} point{'s' if len(mend) > 1 else ''} à régler.",
+            "details": details, "links": []}

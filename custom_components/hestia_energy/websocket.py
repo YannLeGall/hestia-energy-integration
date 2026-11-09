@@ -8,8 +8,9 @@ import voluptuous as vol
 from homeassistant.components import websocket_api
 from homeassistant.core import callback
 
+from . import hub_view
 from .const import DOMAIN
-from .engine import report
+from .engine import hub, report
 
 RUBRIQUES = ("soleil", "chauffage", "eau", "contrat", "appareils", "veille", "pointe")
 
@@ -20,7 +21,7 @@ def _coordinator(hass):
 
 
 def async_setup_websocket(hass) -> None:
-    for command in (ws_view, ws_detail, ws_periods, ws_sources, ws_simulate, ws_settings, ws_set_settings):
+    for command in (ws_view, ws_detail, ws_periods, ws_sources, ws_simulate, ws_hub, ws_settings, ws_set_settings):
         websocket_api.async_register_command(hass, command)
 
 
@@ -107,6 +108,8 @@ def ws_simulate(hass, connection, msg):
     connection.send_error(msg["id"], "not_supported", "Le simulateur de contrat arrive avec la première version stable.")
 
 
+_PRICE = vol.Any(None, vol.All(vol.Coerce(float), vol.Range(min=0, max=5)))
+_EXTENSIONS = tuple(e[0] for e in hub_view.EXTENSIONS)
 SETTINGS = vol.Schema({
     vol.Optional("kva"): vol.Any(None, vol.All(int, vol.In((3, 6, 9, 12, 15, 18, 24, 30, 36)))),
     vol.Optional("margin"): vol.All(vol.Coerce(float), vol.Range(min=0, max=0.3)),
@@ -114,9 +117,21 @@ SETTINGS = vol.Schema({
     vol.Optional("option"): vol.Any(None, vol.In(("base", "hphc", "tempo"))),
     vol.Optional("notify_service"): vol.Any(None, vol.All(str, vol.Match(r"^notify\.[a-z0-9_]+$"))),
     vol.Optional("notify_hour"): vol.All(vol.Coerce(int), vol.Range(min=0, max=23)),
-    vol.Optional("offpeak"): vol.Any(None, vol.All(str, vol.Length(max=60))),
+    # one or more ranges « 00:14-08:19, 12:00-14:00 »; None: those read on the meters
+    vol.Optional("offpeak"): vol.Any(None, vol.All(str, vol.Length(max=120), vol.Match(r"^\s*\d{1,2}[:h]\d{2}\s*-\s*\d{1,2}[:h]\d{2}(\s*,\s*\d{1,2}[:h]\d{2}\s*-\s*\d{1,2}[:h]\d{2})*\s*$"))),
     vol.Optional("bag_price"): vol.Any(None, vol.All(vol.Coerce(float), vol.Range(min=0, max=100))),
+    vol.Optional("offer"): vol.Any(None, vol.In(("bleu", "autre"))),
+    vol.Optional("price_hp"): _PRICE, vol.Optional("price_hc"): _PRICE, vol.Optional("price_base"): _PRICE,
+    vol.Optional("subscription"): vol.Any(None, vol.All(vol.Coerce(float), vol.Range(min=0, max=5000))),
+    vol.Optional("water_price"): vol.Any(None, vol.All(vol.Coerce(float), vol.Range(min=0, max=50))),
+    vol.Optional("stove_fuel"): vol.Any(None, vol.In(("pellets", "gas"))),
+    **{vol.Optional(k): bool for k in ("notify_day", "notify_week", "notify_month", "notify_leak", "notify_forgot")},
+    vol.Optional("groups"): {str: vol.In(hub.GROUPS)},
+    vol.Optional("extensions"): {vol.In(_EXTENSIONS): bool},
 })
+KEYS = ("kva", "margin", "export_price", "option", "bag_price", "notify_service", "notify_hour", "offpeak", "offer", "price_hp",
+        "price_hc", "price_base", "subscription", "water_price", "stove_fuel", "notify_day", "notify_week", "notify_month",
+        "notify_leak", "notify_forgot", "groups", "extensions")
 
 
 @websocket_api.websocket_command({vol.Required("type"): "hestia_energy/settings"})
@@ -128,14 +143,22 @@ def ws_settings(hass, connection, msg):
     if c is None:
         connection.send_error(msg["id"], "not_ready", "Hestia Énergie n'est pas activée.")
         return
-    found = {"kva": (c.extras or {}).get("kva"), "option": (c.data.get("contrat") or {}).get("option"),
-             "export_price": c.contract.export_price if c.contract else None,
-             "poele": bool((c.extras or {}).get("pellets")),
-             "heures_creuses": None if c.offpeak is None or c.offpeak.source == "réglage" else
-             " et ".join(f"de {a} à {b}" for a, b in (r.label() for r in c.offpeak.ranges))}
-    connection.send_result(msg["id"], {"reglages": {k: c.settings.get(k) for k in ("kva", "margin", "export_price", "option", "bag_price",
-                                                                                 "notify_service", "notify_hour", "offpeak")},
-                                       "trouve": found})
+    connection.send_result(msg["id"], {"reglages": {k: c.settings.get(k) for k in KEYS}, "trouve": hub_view.found_settings(hass, c)})
+
+
+@websocket_api.websocket_command({vol.Required("type"): "hestia_energy/hub"})
+@websocket_api.require_admin
+@callback
+def ws_hub(hass, connection, msg):
+    """The Énergie tab of the hub (INTERFACE.md § 5): its pages, from the figures already made."""
+    c = _coordinator(hass)
+    if c is None:
+        connection.send_error(msg["id"], "not_ready", "Hestia Énergie n'est pas activée.")
+        return
+    if not c.data.get("pret"):
+        connection.send_result(msg["id"], {"pret": False})
+        return
+    connection.send_result(msg["id"], hub_view.build(hass, c))
 
 
 @websocket_api.websocket_command({vol.Required("type"): "hestia_energy/set_settings", vol.Required("reglages"): dict})
@@ -151,5 +174,5 @@ async def ws_set_settings(hass, connection, msg):
     except vol.Invalid as err:
         connection.send_error(msg["id"], "invalid", str(err))
         return
-    await c.async_save_settings(changes)
+    await c.async_save_settings(changes, wait=False)
     connection.send_result(msg["id"], {"enregistre": True})

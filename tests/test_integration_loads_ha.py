@@ -34,7 +34,9 @@ class Loads(unittest.IsolatedAsyncioTestCase):
 
     def test_one_home_one_entry(self):
         self.assertEqual(config_flow.EnergyConfigFlow.VERSION, 1)
-        self.assertEqual(len(panel.MENU), 8)
+        # Contrat is gone (INTERFACE.md § 5, H1); Appareils is hidden without devices.
+        self.assertEqual([m[0] for m in panel.MENU], ["", "sources", "appareils", "reglages", "extensions", "bilan", "a-propos"])
+        self.assertNotIn("appareils", [m[0] for m in panel.MENU_NO_DEVICES])
 
 
 if __name__ == "__main__":

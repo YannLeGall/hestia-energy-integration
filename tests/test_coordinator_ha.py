@@ -195,6 +195,57 @@ class FranksHome(unittest.IsolatedAsyncioTestCase):
         websocket.ws_simulate(self.hass, connection, {"id": 4, "type": "hestia_energy/simulate"})
         self.assertEqual(connection.errors[4], "not_supported")
 
+    async def test_the_hub_tab(self):
+        """The Énergie tab of the hub (INTERFACE.md § 5): Frank's sources, devices, settings found, things to mend."""
+        import os
+        from types import SimpleNamespace
+        _, coordinator = await self.setup()
+        from custom_components.hestia_energy import websocket
+
+        class Connection:
+            user = SimpleNamespace(is_admin=True)
+
+            def __init__(self):
+                self.results, self.errors = {}, {}
+
+            def send_result(self, ident, result):
+                self.results[ident] = result
+
+            def send_error(self, ident, code, message):
+                self.errors[ident] = code
+
+        connection = Connection()
+        websocket.ws_hub(self.hass, connection, {"id": 1, "type": "hestia_energy/hub"})
+        tab = connection.results[1]
+        if os.environ.get("HESTIA_HUB_DUMP"):
+            Path(os.environ["HESTIA_HUB_DUMP"]).write_text(json.dumps(tab, ensure_ascii=False, indent=1, default=str), encoding="utf-8")
+        ids = [s["id"] for s in tab["sources"]]
+        self.assertEqual(ids[:3], ["achat", "revente", "soleil"])
+        self.assertIn("eau", ids)
+        achat = tab["sources"][0]
+        self.assertEqual(achat["groupe"], "Électricité")
+        self.assertTrue(achat["origine"])
+        devices = {d["nom"]: d for d in tab["appareils"]["liste"]}
+        heater = next(d for d in devices.values() if "chauffe" in d["nom"].lower() and "eau" in d["nom"].lower())
+        self.assertEqual(heater["groupe"], "eau_chaude")
+        washer = next(d for d in devices.values() if "lave" in d["nom"].lower() and "linge" in d["nom"].lower())
+        self.assertEqual(washer["a_regler"], "Compté en Wh au lieu de kWh")
+        self.assertTrue(any(t["titre"].endswith("compté en Wh") for t in tab["a_regler"]))
+        self.assertTrue(all(t.get("page") for t in [*tab["a_regler"], *tab["a_ameliorer"]]))
+        self.assertEqual([e["id"] for e in tab["extensions"]][:2], ["meteo", "confort"])
+        # A device moved to another group, then the settings found by Hestia.
+        await coordinator.async_save_settings({"groups": {heater["stat"]: "reste"}, "offpeak": "00:14-08:19, 12:00-14:00",
+                                                "water_price": 4.1})
+        websocket.ws_hub(self.hass, connection, {"id": 3, "type": "hestia_energy/hub"})
+        moved = next(d for d in connection.results[3]["appareils"]["liste"] if d["stat"] == heater["stat"])
+        self.assertEqual((moved["groupe"], moved["groupe_devine"]), ("reste", "eau_chaude"))
+        self.assertEqual(len(coordinator.offpeak.ranges), 2)
+        websocket.ws_settings(self.hass, connection, {"id": 4, "type": "hestia_energy/settings"})
+        found = connection.results[4]["trouve"]
+        self.assertEqual(found["option"]["valeur"], "hphc")
+        self.assertTrue(found["offpeak"]["valeur"])
+        self.assertEqual(connection.results[4]["reglages"]["water_price"], 4.1)
+
     async def test_the_consumption_source_is_required(self):
         """D21: no consumption meter in the Energy page, no installation (the paths are shown); Frank's home goes on."""
         from custom_components.hestia_energy.config_flow import EnergyConfigFlow

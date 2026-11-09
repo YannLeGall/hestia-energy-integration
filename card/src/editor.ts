@@ -9,6 +9,7 @@ type Hass={language?:string};
 export const FORMATS:[string,string,string,string][]=[
  ['complete','mdi:page-layout-body','Complète','en ce moment, aujourd’hui, ce mois-ci, puis le détail'],
  ['tuile','mdi:dock-window','Tuile','en ce moment : une phrase, un chiffre'],
+ ['conseils','mdi:piggy-bank-outline','Conseils','ce qui ferait économiser, en euros par an'],
  ['soleil','mdi:solar-power-variant','Soleil','ce que les panneaux ont produit aujourd’hui'],
  ['chauffage','mdi:fire','Chauffage','ce qu’a coûté la saison, depuis le 1er octobre'],
  ['veille','mdi:weather-night','Veille','ce qui tourne la nuit, les 30 dernières nuits'],

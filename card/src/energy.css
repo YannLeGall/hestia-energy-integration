@@ -144,3 +144,23 @@ ha-card.tile .ans-w { margin:0; }
 .ans-k .pastille + .d-close { margin-left:4px; } .ans-k .nw-label + .d-close { margin-left:auto; }
 .empty { font-size:var(--nw-fs-small); color:var(--nw-fg2); }
 @media (prefers-reduced-motion:reduce) { .flow .link i, .live::before, .ov .sheet { animation:none !important; } }
+
+/* The link to the hub under an answer: what is only supposed, to confirm in Réglages (palier 0). */
+.to-hub{color:var(--nw-ok);text-decoration:none;white-space:nowrap}.to-hub:hover{text-decoration:underline}
+
+/* « Pour économiser » (maquette des cartes 3): the advice « à froid », one line each, the gesture and what it brings. */
+.pistes { display:grid; gap:8px; }
+.piste { all:unset; box-sizing:border-box; display:grid; grid-template-columns:auto 1fr auto; gap:2px 10px; align-items:center; padding:10px 12px; border-radius:var(--nw-radius);
+  background:var(--nw-surface); min-width:0; }
+button.piste { cursor:pointer; } button.piste:hover { box-shadow:inset 0 0 0 1px color-mix(in oklab, var(--c) 60%, var(--nw-line)); }
+button.piste:focus-visible { outline:2px solid var(--nw-accent); outline-offset:2px; }
+.piste .ico { grid-row:1 / span 2; }
+.piste .pt { font-size:var(--nw-fs-text); font-weight:650; line-height:1.35; }
+.piste .pw { grid-column:2; font-size:var(--nw-fs-small); color:var(--nw-fg2); line-height:1.45; }
+.piste .pe { grid-row:1 / span 2; grid-column:3; text-align:right; font-variant-numeric:tabular-nums; }
+.piste .pe b { display:block; font-size:var(--nw-fs-case); font-weight:600; letter-spacing:-.015em; line-height:1.1; }
+.piste .pe small { font-size:var(--nw-fs-small); color:var(--nw-fg2); }
+/* What one more piece of equipment would bring: dashed, never counted as advice. */
+.piste.up { background:none; border:1px dashed var(--nw-line); }
+.piste.up .pt { font-weight:600; }
+.piste.up .ico { background:color-mix(in srgb, var(--nw-fg) 6%, transparent); color:var(--nw-fg2); }

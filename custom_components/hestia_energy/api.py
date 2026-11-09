@@ -47,7 +47,8 @@ class HestiaEnergyApi:
 
     @property
     def _ready(self) -> bool:
-        return self.coordinator is not None and self.coordinator.contract is not None
+        # Hestia Confort switched off in the hub (H8): the prices are no longer given, nothing is uninstalled.
+        return self.coordinator is not None and self.coordinator.contract is not None and self.coordinator.used("confort")
 
     def _live(self) -> dict:
         return (self.coordinator.data.get("direct") or {}) if self.coordinator else {}

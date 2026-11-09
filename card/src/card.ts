@@ -26,13 +26,15 @@ type Stove={mois:{kg:number;eur:number|null}|null;saison:{kg:number;eur:number|n
 type View={pret:boolean;palier:number;equipement:{direct?:boolean;soleil?:boolean;appareils?:boolean};direct?:Direct;
  jour?:Period;hier?:Period;mois?:Period;mois_an_dernier?:Period;projection:number|null;
  jusqu_ici?:{euros:number|null;kwh:number;hier_euros:number|null;hier_kwh:number;jusqu_a:string}|null;
+ dernier_jour?:(Period&{jour:string})|null;
+ pistes?:Piste[];
  veille:{w:number;euros_par_an:number|null;nuits:number;
   nuit?:{appareils:{nom:string;w:number;euros_par_an:number|null}[];mesure_w:number;sans_prise_w:number|null;sans_prise_euros_par_an:number|null}|null;
   evolution?:{debut_w:number;debut:string;ecart_w:number;ecart_euros_par_an:number|null}|null}|null;
  veille_historique:{jour:string;w:number}[];
  heures_creuses:[string,string][]|null;
  contrat:{option:string;kva:number;prix:Record<string,number>;revente:number|null;prix_hp?:number|null;prix_hc?:number|null;prix_base?:number|null;
-  abonnement_mois?:number|null;part_hc?:number|null;base_euros?:number|null;seuil_hc?:number|null};
+  abonnement_mois?:number|null;part_hc?:number|null;base_euros?:number|null;seuil_hc?:number|null;a_confirmer?:string[]};
  heures:{aujourdhui:Hour[];hier:Hour[]};
  eau:{jour_l:number;mois_l:number;mois_euros:number|null;prix_m3:number|null;jours?:{jour:string;l:number|null}[];
   plus_gros?:{jour:string;l:number;euros:number|null}|null;l_par_jour?:number|null;euros_100_l?:number|null}|null;
@@ -44,6 +46,10 @@ type View={pret:boolean;palier:number;equipement:{direct?:boolean;soleil?:boolea
 type Config={type:string;card?:string;name?:string};
 
 const RUBRICS=['soleil','chauffage','veille','eau','appareils','pointe','contrat'] as const;
+/** Advice « à froid » (maquette des cartes 3): a gesture, why, and the euros at stake a year or a winter. */
+type Piste={id:string;titre:string;pourquoi:string;euros_an:number|null;unite:string|null;rubrique:string|null};
+const PISTE_LOOK:Record<string,[string,string]>={veille_haute:['moon','--nw-watch'],chauffage_degre:['flame','--nw-heat'],contrat_base:['doc','--nw-ok'],
+ jour_inhabituel:['home','--nw-home'],budget_mois:['doc','--nw-home']};
 type Rubric=typeof RUBRICS[number];
 
 /* Icons of the mock-up, drawn at the stroke (constants: never built from data). */
@@ -75,6 +81,14 @@ const bill=(v:number|null|undefined)=>v==null?'—':cents(v);          // a bill
 const year=(v:number|null|undefined)=>v==null?'—':num(Math.abs(v)>=100?Math.round(v/10)*10:Math.round(v),0);
 const kwh=(v:number|null|undefined)=>v==null?'—':num(v,Math.abs(v)<20?1:0);
 const price=(v:number|null|undefined)=>v==null?'—':cents(v);          // a price a kWh: always to the cent (0,21 €)
+const DAYS=['dimanche','lundi','mardi','mercredi','jeudi','vendredi','samedi'];
+/** « hier », « avant-hier », else the weekday (« samedi »): the day a figure is about, from an ISO date. */
+const dayName=(iso?:string|null)=>{if(!iso)return 'hier';const d=new Date(iso+'T12:00'),t=new Date();t.setHours(12,0,0,0);
+ const k=Math.round((t.getTime()-d.getTime())/864e5);return k===1?'hier':k===2?'avant-hier':DAYS[d.getDay()];};
+const cap=(s:string)=>s.charAt(0).toUpperCase()+s.slice(1);
+/** A link to the hub's page, opened inside Home Assistant (no reload). */
+const toHub=(e:MouseEvent)=>{e.preventDefault();history.pushState(null,'',(e.currentTarget as HTMLAnchorElement).getAttribute('href')??'/hestia/energie');
+ window.dispatchEvent(new CustomEvent('location-changed',{bubbles:true,composed:true}));};
 const MONTHS=['janvier','février','mars','avril','mai','juin','juillet','août','septembre','octobre','novembre','décembre'];
 const SHORT=['janv.','févr.','mars','avr.','mai','juin','juil.','août','sept.','oct.','nov.','déc.'];
 const LEVEL:Record<string,string>={bleu:'ok',vert:'benefit',orange:'action',rouge:'urgent'};
@@ -136,7 +150,7 @@ class HestiaEnergyCard extends LitElement {
  static getConfigElement(){return document.createElement('hestia-energy-card-editor');}
  setConfig(config:Config){
   const card=config.card??'complete';
-  if(card!=='complete'&&card!=='tuile'&&!RUBRICS.includes(card as Rubric))throw new Error(`card: ${card} ? (complete, tuile, ${RUBRICS.join(', ')})`);
+  if(card!=='complete'&&card!=='tuile'&&card!=='conseils'&&!RUBRICS.includes(card as Rubric))throw new Error(`card: ${card} ? (complete, tuile, conseils, ${RUBRICS.join(', ')})`);
   this._config={...config,card};
  }
  getCardSize(){return this._config.card==='tuile'?2:8;}
@@ -160,6 +174,7 @@ class HestiaEnergyCard extends LitElement {
   if(!v||!v.pret)return html`<ha-card><div class="empty">Hestia Énergie lit la page Énergie…</div></ha-card>`;
   const card=this._config.card;
   if(card==='tuile')return this._tile(v);
+  if(card==='conseils')return this._advice(v);
   if(card!=='complete')return html`<ha-card>${this._detail(v,card as Rubric,false)}</ha-card>`;
   return html`${this._full(v)}${this._open?html`<div class="ov" @click=${(e:Event)=>{if(e.target===e.currentTarget)this._open=undefined;}}
    @keydown=${(e:KeyboardEvent)=>{if(e.key==='Escape')this._open=undefined;}}><ha-card class="sheet" role="dialog" aria-modal="true">${this._detail(v,this._open,true)}</ha-card></div>`:nothing}`;
@@ -186,12 +201,17 @@ class HestiaEnergyCard extends LitElement {
  private _tile(v:View){
   const b=v.direct?.bandeau,c=b?TONE[b.couleur]??'--nw-ok':'--nw-ok',live=this._live(v);
   const pill=b?html`<span class="pastille" style="--c:var(${c})">${b.pastille}</span>`:nothing;
+  // Nothing to do now: the tile gives the advice « à froid » worth the most (maquette des cartes 3).
+  const best=(v.pistes??[]).find(p=>p.euros_an!=null);
   if(live)return html`<ha-card class="tile"><div class="t-row"><span class="ico" style="--c:var(--nw-home)">${icon('home')}</span><span class="nw-label">Énergie · <i>en ce moment</i></span>${pill}</div>
-   <p class="ans-t">La maison consomme <b>${kw(v.direct!.maison_w)} kW</b></p><p class="ans-w">${this._nowSay(v,false)}</p></ha-card>`;
-  const y=v.hier;
-  return html`<ha-card class="tile"><div class="t-row"><span class="ico" style="--c:var(--nw-home)">${icon('home')}</span><span class="nw-label">Énergie · <i>hier</i></span>${pill}</div>
-   <p class="ans-t">${y?.euros!=null?html`Hier, la maison a coûté <b>${eur(y.euros)} €</b>`:html`Hier, la maison a acheté <b>${kwh(y?.kwh_achetes)} kWh</b>`}</p>
-   <p class="ans-w">${y?.euros!=null?html`<b>${kwh(y.kwh_achetes)} kWh</b> achetés au réseau${y.soleil_couvre!=null?html` ; le soleil a couvert <b>${y.soleil_couvre} %</b> de la maison`:''}.`:'Le prix sera connu avec le contrat.'}</p></ha-card>`;
+   <p class="ans-t">La maison consomme <b>${kw(v.direct!.maison_w)} kW</b></p><p class="ans-w">${b?.couleur==='bleu'&&best?html`Rien à faire maintenant. ${this._saySave(best)}`:this._nowSay(v,false)}</p></ha-card>`;
+  // The latest whole day: yesterday, or the day before while Enedis has not sent yesterday (HA Linky, palier 0).
+  const y=v.dernier_jour,day=dayName(y?.jour);
+  if(!y)return html`<ha-card class="tile"><div class="t-row"><span class="ico" style="--c:var(--nw-home)">${icon('home')}</span><span class="nw-label">Énergie</span>${pill}</div>
+   <p class="ans-t">Les premiers jours arrivent</p><p class="ans-w">Enedis envoie chaque journée le lendemain.</p></ha-card>`;
+  return html`<ha-card class="tile"><div class="t-row"><span class="ico" style="--c:var(--nw-home)">${icon('home')}</span><span class="nw-label">Énergie · <i>${day}</i></span>${pill}</div>
+   <p class="ans-t">${y?.euros!=null?html`${cap(day)}, la maison a coûté <b>${eur(y.euros)} €</b>`:html`${cap(day)}, la maison a acheté <b>${kwh(y?.kwh_achetes)} kWh</b>`}</p>
+   <p class="ans-w">${best?this._saySave(best):y?.euros!=null?html`<b>${kwh(y.kwh_achetes)} kWh</b> achetés au réseau${y.soleil_couvre!=null?html` ; le soleil a couvert <b>${y.soleil_couvre} %</b> de la maison`:''}.`:'Le prix sera connu avec le contrat.'}</p></ha-card>`;
  }
 
  /* ── 2 · The full card ── */
@@ -201,9 +221,10 @@ class HestiaEnergyCard extends LitElement {
   const secs=[this._nowSection(v),this._todaySection(v),this._monthSection(v)].filter(s=>s!==nothing);
   return html`<ha-card>
    <div class="head"><div style="min-width:0"><div class="nw-label">Énergie</div><div class="nw-title">${this._name()}</div></div><div class="when">${when}</div></div>
-   ${b?html`<div class="nw-band nw-glass" data-level=${LEVEL[b.couleur]??'ok'}><div class="nw-band-row"><span class="nw-band-pic box">${icon(BANNER_ICON[b.id]??'home')}</span>
+   ${b&&this._live(v)?html`<div class="nw-band nw-glass" data-level=${LEVEL[b.couleur]??'ok'}><div class="nw-band-row"><span class="nw-band-pic box">${icon(BANNER_ICON[b.id]??'home')}</span>
     <div class="nw-band-text"><p class="nw-band-kicker">En ce moment</p><p class="nw-band-title">${b.titre}</p>${b.pourquoi||this._periodSay(v)?html`<p class="nw-band-line">${b.pourquoi||this._periodSay(v)}</p>`:nothing}</div></div></div>`:nothing}
    <div class="periods${secs.length===2?' two':''}">${secs}</div>
+   ${v.pistes?.length?this._section('save','Pour économiser','à froid, en euros',html`<div class="pistes">${v.pistes.slice(0,3).map(p=>this._piste(p))}</div>`):nothing}
    ${this._section('more','En détail','touchez pour ouvrir',html`<div class="more">${this._goes(v)}</div>`)}
   </ha-card>`;
  }
@@ -232,8 +253,9 @@ class HestiaEnergyCard extends LitElement {
   const d=v.direct;
   if(!d)return nothing;
   if(!this._live(v)){
-   // No live power (a Linky read the day after): the price of the moment still says something.
-   if(d.prix==null)return nothing;
+   // No live power (a Linky read the day after): the price of the moment still says something, unless the option is only
+   // supposed (palier 0 before the household said it: a price that may be wrong is not said).
+   if(d.prix==null||(v.contrat?.a_confirmer??[]).includes('option'))return nothing;
    const next=d.prochain_changement?` jusqu'à ${clock(new Date(d.prochain_changement.a))}`:'';
    return this._section('now','En ce moment',this._when(d),html`<div class="lines"><div class="line"><span class="ico" style="--c:var(--nw-grid)">${icon('clock')}</span>
     <span>Le kWh coûte <b>${price(d.prix)} €</b>${this._when(d)?` ${this._when(d)}`:''}${next}.</span></div></div>`);
@@ -256,10 +278,10 @@ class HestiaEnergyCard extends LitElement {
     <p class="say">${small?html`Comme hier à la même heure.`:html`<b>${fmt(Math.abs(gap))} ${unit} de ${gap>0?'plus':'moins'}</b> qu'hier à la même heure.`}</p>
     ${hb([{n:'Aujourd\'hui',v:a,txt:`${fmt(a)} ${unit}`},{n:`Hier à ${hour(h)}`,v:b,txt:`${fmt(b)} ${unit}`,muted:true,soft:true}],'--nw-home')}`);
   }
-  const y=v.hier;
-  if(!y||y.kwh_achetes<=0)return nothing;
+  const y=v.dernier_jour;
+  if(!y)return nothing;
   // The statistics come the day after (HA Linky): yesterday, whole, is the latest day known.
-  return this._section('today','Hier','toute la journée',html`<div class="big"><b>${y.euros!=null?`${eur(y.euros)} €`:`${kwh(y.kwh_achetes)} kWh`}</b><span>${y.euros!=null?'pour toute la journée':'achetés au réseau'}</span></div>
+  return this._section('today',cap(dayName(y.jour)),'toute la journée',html`<div class="big"><b>${y.euros!=null?`${eur(y.euros)} €`:`${kwh(y.kwh_achetes)} kWh`}</b><span>${y.euros!=null?'pour toute la journée':'achetés au réseau'}</span></div>
    ${y.euros!=null?html`<p class="say"><b>${kwh(y.kwh_achetes)} kWh</b> achetés au réseau${y.soleil_couvre!=null?html` ; le soleil a couvert <b>${y.soleil_couvre} %</b> de la maison`:''}.</p>`:nothing}`);
  }
  private _monthSection(v:View){
@@ -311,6 +333,33 @@ class HestiaEnergyCard extends LitElement {
   if(el)return {val:el.eur!=null?eur(el.eur):kwh(el.kwh),unit:el.eur!=null?'€':'kWh',say:'Radiateurs, estimés d\'après le froid.',both:false};
   if(h?.etat==='peu_lie')return {val:'—',unit:'',say:'Vous chauffez sans doute avec une autre énergie.',both:false};
   return null;
+ }
+
+ /* ── Advice « à froid »: one line each, the gesture and what it brings; a touch opens its detail card ── */
+ private _saySave(p:Piste){return html`Pour économiser : ${p.titre.charAt(0).toLowerCase()+p.titre.slice(1)}, <b>${num(p.euros_an!,0)} € ${p.unite??'par an'}</b>.`;}
+ private _piste(p:Piste){
+  const [ic,c]=PISTE_LOOK[p.id]??['home','--nw-home'],key=p.rubrique&&(RUBRICS as readonly string[]).includes(p.rubrique)?p.rubrique as Rubric:undefined;
+  const body=html`<span class="ico" style="--c:var(${c})">${icon(ic)}</span><span class="pt">${p.titre}</span><span class="pw">${p.pourquoi}</span>
+   ${p.euros_an!=null?html`<span class="pe"><b>${num(p.euros_an,0)} €</b><small>${p.unite??'par an'}</small></span>`:nothing}`;
+  return key?html`<button class="piste" style="--c:var(${c})" @click=${()=>{this._open=key;}}>${body}</button>`:html`<div class="piste" style="--c:var(${c})">${body}</div>`;
+ }
+ /** What one more piece of equipment, or one word in Réglages, would bring: dashed, never counted as advice. */
+ private _ups(v:View){
+  const out:[string,string,string][]=[];
+  if((v.contrat?.a_confirmer??[]).includes('option'))out.push(['doc','Un conseil sur votre contrat ?','Dites votre option et vos heures creuses dans les Réglages : Hestia vous dira si elles rapportent.']);
+  if(!v.equipement.direct)out.push(['bolt','Les gestes au bon moment','Un module sur la prise du Linky : heures creuses, disjoncteur, le prix de l’heure.']);
+  else if(!v.equipement.appareils)out.push(['plug','Savoir ce qui consomme','Une prise mesurée sur le frigo ou le chauffe-eau : la veille appareil par appareil, l’appareil oublié.']);
+  return out.map(([ic,t,w])=>html`<div class="piste up"><span class="ico">${icon(ic)}</span><span class="pt">${t}</span><span class="pw">${w}</span></div>`);
+ }
+ /* ── 4 · Conseils: the advice « à froid » alone, the most euros first (card: conseils) ── */
+ private _advice(v:View){
+  const all=v.pistes??[],year=all.filter(p=>p.unite==='par an').reduce((a,p)=>a+(p.euros_an??0),0);
+  const title=year>0?html`Jusqu’à <b>${num(year,0)} €</b> par an`:all.length?html`<b>${all.length}</b> conseil${all.length>1?'s':''} pour vous`:'Rien à changer pour l’instant';
+  const why=all.length?`${all.length>1?`${all.length} conseils tirés`:'Un conseil tiré'} de vos 12 derniers mois, du plus rentable au moins rentable.`:'Hestia regarde chaque jour vos habitudes et votre contrat ; un conseil apparaîtra ici dès qu’il vaut la peine.';
+  return html`<ha-card>${this._ans({ic:'home',c:'--nw-home',subject:'Énergie',period:'pour économiser',title,why,over:false})}
+   <div class="pistes">${all.map(p=>this._piste(p))}${this._ups(v)}</div></ha-card>
+   ${this._open?html`<div class="ov" @click=${(e:Event)=>{if(e.target===e.currentTarget)this._open=undefined;}}
+    @keydown=${(e:KeyboardEvent)=>{if(e.key==='Escape')this._open=undefined;}}><ha-card class="sheet" role="dialog" aria-modal="true">${this._detail(v,this._open,true)}</ha-card></div>`:nothing}`;
  }
 
  /* ── 3 · The detail cards: the answer header, then the panels ── */
@@ -456,7 +505,8 @@ class HestiaEnergyCard extends LitElement {
  private _contract(v:View,over:boolean){
   const c=v.contrat,now=new Date(),head={ic:'doc',c:'--nw-ok',subject:'Contrat',period:'ce mois-ci',over};
   const ranges=offpeak(v.heures_creuses),night=atNight(ranges);
-  const kvaSay=c?.kva?`Puissance : ${c.kva} kVA.`:'';
+  const supposed=c?.a_confirmer??[];
+  const kvaSay=html`${c?.kva?`Puissance : ${c.kva} kVA${supposed.includes('kva')?' (supposée)':''}.`:''}${supposed.length?html` <a class="to-hub" href="/hestia/energie/reglages" @click=${toHub}>${supposed.includes('option')?(supposed.length>1?'Option et puissance':'Option'):'Puissance'} à confirmer dans les Réglages ›</a>`:nothing}`;
   const lines:[string,number|null|undefined,string][]=[
    ...(c?.option==='hphc'?[['Heures pleines',c.prix_hp,'le kWh'],['Heures creuses',c.prix_hc,'le kWh']] as [string,number|null|undefined,string][]
     :c?.option==='base'?[['Le kWh',c.prix_base,'à toute heure']] as [string,number|null|undefined,string][]:[]),
@@ -465,7 +515,7 @@ class HestiaEnergyCard extends LitElement {
    html`<div class="hb list">${lines.filter(r=>r[1]!=null).map(([n,x,u])=>html`<span class="n">${n}</span><span class="v">${u==='par mois'?eur(x):price(x)} €<small>${u}</small></span>`)}</div>`);
   if(c?.option!=='hphc'){
    const base=c?.option==='base';
-   return html`${this._ans({...head,title:base&&c?.prix_base!=null?html`Option Base : <b>${price(c.prix_base)} €</b> le kWh à toute heure`:html`Option <b>${c?.option==='tempo'?'Tempo':'Base'}</b>`,why:kvaSay})}
+   return html`${this._ans({...head,title:base&&c?.prix_base!=null?html`Option Base${supposed.includes('option')?' (supposée)':''} : <b>${price(c.prix_base)} €</b> le kWh à toute heure`:html`Option <b>${c?.option==='tempo'?'Tempo':'Base'}</b>`,why:kvaSay})}
     <div class="encs">${prices}</div>`;
   }
   const label=v.heures_creuses?.length?v.heures_creuses.map(([a,b])=>`${nb(a)} à ${nb(b)}`).join(' et de '):null;

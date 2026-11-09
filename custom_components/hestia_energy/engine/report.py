@@ -182,12 +182,39 @@ def reviews(home: Home, contract: Contract, table: dict, now: datetime) -> list[
     return out
 
 
+def known_until(home: Home) -> datetime | None:
+    """The end of the last hour the bought energy is known (HA Linky: yesterday or the day before, not now)."""
+    known = [h.start + timedelta(hours=h.hours) for h in (home.bought.hours if home.bought else []) if h.kwh is not None]
+    return max(known) if known else None
+
+
+def last_whole_day(home: Home, contract: Contract, table: dict, now: datetime, back: int = 4) -> dict | None:
+    """The latest day the statistics know whole (yesterday, or the day before when Enedis has not sent it yet):
+    {jour, …Period}. None when none of the last days is whole."""
+    if home.bought is None:
+        return None
+    today = now.astimezone(home.tz).date()
+    for k in range(1, back + 1):
+        when = today - timedelta(days=k)
+        start, end = tariff.day_bounds(when, home.tz)
+        bought = stats.total(home.bought, start, end)
+        if bought.hours >= 23 and bought.unknown_hours <= 1 and bought.kwh > 0:
+            return {"jour": when.isoformat(), **period(home, contract, table, start, end).as_dict()}
+    return None
+
+
 def so_far(home: Home, contract: Contract, table: dict, now: datetime) -> dict | None:
     """Today until the last whole hour of the statistics, against yesterday until the same hour (2.2):
     {euros, kwh, hier_euros, hier_kwh, jusqu_a}. Euros None when a price is unknown; None before 1 h of the day."""
     tz = home.tz
     cut = now.astimezone(tz).replace(minute=0, second=0, microsecond=0)
     start = tariff.day_bounds(cut.date(), tz)[0]
+    # Up to the last hour the statistics know: with HA Linky (palier 0) today comes tomorrow, and a day of
+    # subscription alone is not « dépensés depuis minuit » (found on a Linky-only home, 9 Nov. 2026).
+    known = [h.start + timedelta(hours=h.hours) for h in (home.bought.hours if home.bought else []) if h.kwh is not None]
+    if not known:
+        return None
+    cut = min(cut, max(known))
     if cut <= start:
         return None
     today = period(home, contract, table, start, cut)
