@@ -3,6 +3,7 @@ import {unsafeHTML} from 'lit/directives/unsafe-html.js';
 import charte from './ui/hestia-charte.css';
 import energy from './energy.css';
 import './editor';
+import {follow,type Connection} from './stream';
 
 /* Hestia Énergie's card, after the cards' mock-up 2 (docs/maquette-cartes-2.html, validated by Frank on 8 Nov. 2026):
    1 · the tile: « Énergie · en ce moment », one sentence, one figure (card: tuile)
@@ -13,7 +14,7 @@ import './editor';
        per card, then the panels (a title in plain words, a sentence with a figure, a drawing).
    Every figure comes from the integration (hestia_energy/view): the card only puts it into words. */
 
-type Hass={callWS:<T>(msg:Record<string,unknown>)=>Promise<T>;states:Record<string,{last_updated:string}>};
+type Hass={callWS:<T>(msg:Record<string,unknown>)=>Promise<T>;states:Record<string,{last_updated:string}>;connection:Connection};
 type Banner={id:string;couleur:string;pastille:string;titre:string;pourquoi:string};
 type Period={euros:number|null;euros_energie:number|null;kwh_achetes:number;soleil_kwh:number|null;revendu_kwh:number|null;revendu_euros:number|null;soleil_couvre:number|null;soleil_garde:number|null;heures_inconnues:number;debut:string};
 type Hour={h:number;achat:number|null;soleil:number|null;revente:number|null};
@@ -143,7 +144,7 @@ class HestiaEnergyCard extends LitElement {
  static styles=[unsafeCSS(charte),unsafeCSS(energy)];
  static properties={_view:{state:true},_open:{state:true},_folded:{state:true},_error:{state:true}};
  declare _view?:View;declare _open?:Rubric;declare _folded:Set<string>;declare _error?:string;
- private _hass?:Hass;private _config:Config={type:'custom:hestia-energy-card',card:'complete'};private _stamp='';private _asked=0;private _timer?:number;
+ private _hass?:Hass;private _config:Config={type:'custom:hestia-energy-card',card:'complete'};private _stop?:()=>void;private _again?:number;
  constructor(){super();this._folded=new Set();}
 
  static getStubConfig(){return {card:'complete'};}
@@ -154,18 +155,23 @@ class HestiaEnergyCard extends LitElement {
   this._config={...config,card};
  }
  getCardSize(){return this._config.card==='tuile'?2:8;}
+ // The view comes from one subscription shared by every Énergie card of the page (stream.ts): whole once, then only
+ // what changed, as soon as it changes. The card never recomputes anything, and never asks on its own.
  set hass(hass:Hass){
+  const other=this._hass?.connection!==hass.connection;
   this._hass=hass;
-  // A new view when the banner's entity changes, and at least every minute: the card never recomputes anything.
-  const stamp=hass.states['sensor.hestia_energy_conseil']?.last_updated??'';
-  if(stamp!==this._stamp||Date.now()-this._asked>60000){this._stamp=stamp;void this._load();}
+  if(other||!this._stop)this._follow();
  }
- connectedCallback(){super.connectedCallback();this._timer=window.setInterval(()=>void this._load(),60000);}
- disconnectedCallback(){super.disconnectedCallback();window.clearInterval(this._timer);}
- private async _load(){
-  if(!this._hass)return;this._asked=Date.now();
-  try{this._view=await this._hass.callWS<View>({type:'hestia_energy/view'});this._error=undefined;}
-  catch(e){this._error=(e as {message?:string}).message??'Hestia Énergie ne répond pas.';}
+ connectedCallback(){super.connectedCallback();this._follow();}
+ disconnectedCallback(){super.disconnectedCallback();this._unfollow();}
+ private _unfollow(){this._stop?.();this._stop=undefined;window.clearTimeout(this._again);}
+ private _follow(){
+  this._unfollow();
+  if(!this._hass||!this.isConnected)return;
+  this._stop=follow(this._hass.connection,v=>{this._view=v as unknown as View;this._error=undefined;},
+   e=>{this._stop=undefined;this._error=e.message??'Hestia Énergie ne répond pas.';this._again=window.setTimeout(()=>this._follow(),30000);},
+   // Hestia Énergie reloaded: the new one is followed a moment later.
+   ()=>{this._stop=undefined;this._again=window.setTimeout(()=>this._follow(),2000);});
  }
 
  render(){

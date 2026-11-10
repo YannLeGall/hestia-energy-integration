@@ -13,21 +13,28 @@ from dataclasses import dataclass
 from datetime import date, datetime, tzinfo
 import statistics
 
+from .rows import Rows, when
+
 SHARE = 0.5          # under half of its usual share
 MIN_DAY_KWH = 3.0    # of a day that produced at least this much
 WINDOW = 21          # the usual share: the median of the days before, at most three weeks
 MIN_DAYS = 7         # with at least a week of them
 
 
+def _means(values) -> list[tuple[float, float]]:
+    """(start in seconds, mean power) of each hour that has one."""
+    found = Rows.of(values)
+    column = found.column("mean")
+    return [] if column is None else [(t, m) for t, m in zip(found.ts, column) if m == m]
+
+
 def channel_days(rows: dict[str, list[dict]], tz: tzinfo) -> dict[date, dict[str, float]]:
     """Each day's energy of each channel (kWh) from its hourly mean power (W); a day counts only with every channel."""
     out: dict[date, dict[str, float]] = defaultdict(dict)
     for channel, values in rows.items():
-        for row in values:
-            if row.get("mean") is None:
-                continue
-            day = row["start"].astimezone(tz).date()
-            out[day][channel] = out[day].get(channel, 0.0) + max(0.0, row["mean"]) / 1000
+        for start, mean in _means(values):
+            day = when(start).astimezone(tz).date()
+            out[day][channel] = out[day].get(channel, 0.0) + max(0.0, mean) / 1000
     return {d: v for d, v in out.items() if len(v) == len(rows)}
 
 

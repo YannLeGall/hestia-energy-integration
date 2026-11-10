@@ -34,13 +34,7 @@ class Baseload:
 def baseload(series: Series, tz: tzinfo, end: date | None = None, min_nights: int = None) -> Baseload | None:
     """The baseload of the 28 nights before `end` (included), or None with fewer than 14 nights of hourly data
     (`min_nights`: fewer for the advice « à froid », HA Linky keeping its last seven days hour by hour)."""
-    hours: list[tuple[date, float]] = []
-    for hour in series.hours:
-        if hour.kwh is None or hour.hours != 1:
-            continue
-        local = hour.start.astimezone(tz)
-        if NIGHT[0] <= local.hour < NIGHT[1]:
-            hours.append((local.date(), hour.kwh))
+    hours = series.memo(("nights", tz), lambda: _night_hours(series, tz))
     if not hours:
         return None
     end = end or max(d for d, _ in hours)
@@ -50,6 +44,19 @@ def baseload(series: Series, tz: tzinfo, end: date | None = None, min_nights: in
         return None
     values = sorted(kwh for _, kwh in window)
     return Baseload(round(values[int(len(values) * CENTILE)] * 1000), nights, end)
+
+
+def _night_hours(series: Series, tz: tzinfo) -> list[tuple[date, float]]:
+    """The night's whole hours (local day, kWh), worked out once for these hours: a baseload is asked about fifty
+    times a report (each of the last 30 nights, the rise against the past months)."""
+    hours: list[tuple[date, float]] = []
+    for hour in series.hours:
+        if hour.kwh is None or hour.hours != 1:
+            continue
+        local = hour.start.astimezone(tz)
+        if NIGHT[0] <= local.hour < NIGHT[1]:
+            hours.append((local.date(), hour.kwh))
+    return hours
 
 
 def yearly_euros(watts: float, price_per_kwh: float | None) -> float | None:

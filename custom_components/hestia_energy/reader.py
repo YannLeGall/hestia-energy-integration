@@ -5,14 +5,19 @@ runs in the Recorder's own thread; a Recorder that cannot answer gives empty row
 """
 from __future__ import annotations
 
-from datetime import UTC, datetime, timedelta
+import asyncio
+from collections.abc import Callable
+from datetime import datetime, timedelta
 import logging
 import re
+import weakref
 
 from homeassistant.components.recorder import get_instance, statistics
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import area_registry as ar, device_registry as dr, entity_registry as er
 from homeassistant.loader import async_get_integration, async_get_loaded_integration
+
+from .engine.rows import Rows
 
 _LOGGER = logging.getLogger(__name__)
 # Units the statistics are read in, whatever the sensor's own (a meter in Wh comes in kWh).
@@ -30,14 +35,35 @@ async def energy_prefs(hass: HomeAssistant) -> dict | None:
     return dict(manager.data) if manager.data else None
 
 
-async def listen_prefs(hass: HomeAssistant, callback) -> None:
-    """Call `callback` (a coroutine function) when the Energy page changes."""
+async def listen_prefs(hass: HomeAssistant, callback) -> Callable[[], None]:
+    """Call `callback` (a coroutine function) when the Energy page changes; returns what stops it.
+
+    Home Assistant gives no way to stop listening: the page keeps the listener for good. So it gets a small relay that
+    holds the brick only weakly, and is taken out of the page's list when it can be: a reloaded brick never stays in
+    memory with its year of statistics, nor computes again for a page change (audit of 9 Nov. 2026)."""
+    target = weakref.WeakMethod(callback) if hasattr(callback, "__self__") else (lambda: callback)
+    stopped = False
+
+    async def relay() -> None:
+        found = target()
+        if not stopped and found is not None:
+            await found()
+
+    manager = None
     try:
         from homeassistant.components.energy.data import async_get_manager
         manager = await async_get_manager(hass)
-        manager.async_listen_updates(callback)
+        manager.async_listen_updates(relay)
     except Exception as err:  # noqa: BLE001
         _LOGGER.debug("Energy page not followed: %s", err)
+
+    def stop() -> None:
+        nonlocal stopped
+        stopped = True
+        listeners = getattr(manager, "_update_listeners", None)
+        if isinstance(listeners, list) and relay in listeners:
+            listeners.remove(relay)
+    return stop
 
 
 async def metadata(hass: HomeAssistant, ids: set[str]) -> dict[str, dict]:
@@ -51,27 +77,21 @@ async def metadata(hass: HomeAssistant, ids: set[str]) -> dict[str, dict]:
     return {sid: dict(meta) for sid, (_, meta) in found.items()}
 
 
-async def hourly(hass: HomeAssistant, ids: set[str], start: datetime, end: datetime | None = None) -> dict[str, list[dict]]:
-    """Each statistic's hours since `start`: {id: [{start (aware, UTC), mean, min, max, sum}]}, in kWh, W, L."""
+async def hourly(hass: HomeAssistant, ids: set[str], start: datetime, end: datetime | None = None) -> dict[str, Rows]:
+    """Each statistic's hours since `start`: {id: Rows of (start, mean, min, max, sum)}, in kWh, W, L. Kept compact
+    (engine/rows.py): a year of a home's statistics in about 15 MB instead of 180."""
     if not ids:
         return {}
 
     def read():
         rows = statistics.statistics_during_period(hass, start, end, ids, "hour", UNITS, {"mean", "min", "max", "sum"})
-        return {sid: [{"start": _when(r["start"]), "mean": r.get("mean"), "min": r.get("min"), "max": r.get("max"),
-                       "sum": r.get("sum")} for r in values] for sid, values in rows.items()}
+        return {sid: Rows.of(values) for sid, values in rows.items()}
 
     try:
         return await get_instance(hass).async_add_executor_job(read)
     except Exception as err:  # noqa: BLE001 - no statistics: the reports say so, nothing is invented
         _LOGGER.warning("Statistics unavailable: %s", err)
         return {}
-
-
-def _when(value) -> datetime:
-    if isinstance(value, datetime):
-        return value.astimezone(UTC)
-    return datetime.fromtimestamp(value, UTC)
 
 
 # --- What the home has besides the Energy page (extensions, F1, 8.3) --------------------------------------------
@@ -102,19 +122,12 @@ def detect(hass: HomeAssistant) -> dict:
     registry = er.async_get(hass)
     found = {"period": None, "tempo_today": None, "tempo_tomorrow": None, "inverter": None, "channels": [], "kva": None,
              "comwatt": False}
-    for state in hass.states.async_all("sensor"):
-        eid = state.entity_id
-        # Never its own sensors: « Période » (hp/hc) would pass for the meter's own, and a home with HA Linky only
-        # would look live (found on a Linky-only home, 9 Nov. 2026).
-        own = registry.async_get(eid)
-        if (own is not None and own.platform == "hestia_energy") or eid.startswith("sensor.hestia_energy_"):
-            continue
-        if found["period"] is None and _PERIOD_STATE.match(state.state or "") and not _TEMPO.search(eid):
-            found["period"] = eid
-        if _TEMPO.search(eid) and colour_of(state.state):
-            key = "tempo_tomorrow" if re.search(r"demain|tomorrow|prochain|next", eid) else "tempo_today"
-            found[key] = found[key] or eid
+    # One pass over the registry, one over the sensors (audit of 9 Nov. 2026: three passes and a registry lookup per
+    # sensor held Home Assistant's loop 0.13 s on the lab, at each hourly report).
+    own = set()
     for entry in registry.entities.values():
+        if entry.platform == "hestia_energy":
+            own.add(entry.entity_id)
         if entry.platform == "opendtu" and entry.domain == "sensor":
             if re.search(r"_ch\d+_power$", entry.entity_id):
                 found["channels"].append(entry.entity_id)
@@ -124,23 +137,36 @@ def detect(hass: HomeAssistant) -> dict:
             found["comwatt"] = True
         if found["kva"] is None and (match := _KVA.search(entry.entity_id)):
             found["kva"] = int(match.group(1))
+    sensors = hass.states.async_all("sensor")
+    for state in sensors:
+        eid = state.entity_id
+        # Never its own sensors: « Période » (hp/hc) would pass for the meter's own, and a home with HA Linky only
+        # would look live (found on a Linky-only home, 9 Nov. 2026).
+        if eid in own or eid.startswith("sensor.hestia_energy_"):
+            continue
+        tempo = _TEMPO.search(eid)
+        if found["period"] is None and not tempo and _PERIOD_STATE.match(state.state or ""):
+            found["period"] = eid
+        if tempo and colour_of(state.state):
+            key = "tempo_tomorrow" if re.search(r"demain|tomorrow|prochain|next", eid) else "tempo_today"
+            found[key] = found[key] or eid
     if not found["inverter"]:
         # OpenDTU seen by its names only (a copy by Remote Home-Assistant, or entities without their registry entry).
-        names = [s.entity_id for s in hass.states.async_all("sensor")]
+        names = [s.entity_id for s in sensors]
         found["inverter"] = next((n for n in names if re.match(r"sensor\.opendtu_\w+_ac_power$", n)), None)
         if found["inverter"] and not found["channels"]:
             found["channels"] = [n for n in names if re.search(r"_ch\d+_power$", n)]
     found["channels"].sort()
-    found["pellets"] = pellet_tracking(hass)
+    found["pellets"] = pellet_tracking(hass, sensors)
     return found
 
 
-def pellet_tracking(hass: HomeAssistant) -> dict | None:
+def pellet_tracking(hass: HomeAssistant, sensors: list | None = None) -> dict | None:
     """Suivi Stock Pellet (the pellet stove's extension): its sensors found by the role each one carries
     (`suivi_stock_pellet_key`), so a renamed entity, or a copy of it, is still found; the season's purchases and the
     bag's weight. None without it."""
     roles = {}
-    for state in hass.states.async_all("sensor"):
+    for state in sensors if sensors is not None else hass.states.async_all("sensor"):
         key = state.attributes.get("suivi_stock_pellet_key")
         if key and key not in roles:
             roles[key] = state
@@ -221,7 +247,9 @@ async def degree_days(hass: HomeAssistant, days: list) -> dict:
     out = {}
     if api is None or not hasattr(api, "degree_days"):
         return out
-    for day in days:
+    for n, day in enumerate(days):
+        if n % 10 == 9:
+            await asyncio.sleep(0)   # a year asked at start: the loop breathes between days (0.19 s held at once before)
         try:
             found = await api.degree_days(day)
         except Exception as err:  # noqa: BLE001 - another brick's trouble never stops this one

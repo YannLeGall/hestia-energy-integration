@@ -19,7 +19,7 @@ type Hub={pret:boolean;soleil:boolean;direct:boolean;vide:boolean;a_regler:Todo[
  mois:Period|null;projection:number|null;mois_an_dernier:Period|null;douze_mois:{euros:number|null;du:string;au:string;soleil_couvre:number|null;revendu_euros:number|null}|null;
  bilans:{id:string;titre:string;texte:string;euros:number|null;kwh:number}[];chauffage:{etat:string;mois?:{kwh:number;eur:number|null}|null;poele?:{saison?:{kg:number;eur:number|null}}|null}|null;
  eau:{mois_l:number;mois_euros:number|null}|null;sources:Source[];appareils:{liste:Device[];mois:string|null;part:number|null};extensions:Ext[];groupes:[string,string][];
- tarifs:string|null;notifie:boolean;pistes:{id:string;titre:string;pourquoi:string;euros_an:number|null;unite:string|null}[]};
+ tarifs:string|null;notifie:boolean;mis_a_jour?:string;pistes:{id:string;titre:string;pourquoi:string;euros_an:number|null;unite:string|null}[]};
 type Found<V>={valeur:V|null;source:string|null};
 type Settings={reglages:Record<string,unknown>;trouve:{option:Found<string>;offpeak:Found<[string,string][]>;kva:Found<number>;offer:Found<string>;
  tarif_bleu:{hp?:number|null;hc?:number|null;base?:number|null;abonnement:number|null};prix_page:Record<string,number>;export_price:Found<number>;water_price:Found<number>;
@@ -141,10 +141,21 @@ export class HestiaEnergySetup extends LitElement {
  private async save(){
   this.saving=true;
   // Kept at once; the figures that follow a setting (prices, off-peak hours) come with the next reports, read again later.
+  const before=this.hub?.mis_a_jour;
   try{await this.hass!.callWS({type:'hestia_energy/set_settings',reglages:this.draft});this.draft={};this.saved=true;this.months=undefined;await this.load();
-   setTimeout(()=>{if(this.isConnected){this.months=undefined;void this.load();}},20000);}
+   void this.untilNewReports(before);}
   catch(e){this.error=(e as {message?:string}).message??'Réglages non enregistrés.';}
   finally{this.saving=false;}
+ }
+ /** The figures that follow a setting come with the next reports: read again as soon as they are made (every 2 s,
+     a minute at most), never after a fixed wait that a slow Home Assistant would miss (audit of 9 Nov. 2026). */
+ private async untilNewReports(before?:string){
+  for(let i=0;i<30&&this.isConnected;i++){
+   await new Promise(r=>setTimeout(r,2000));
+   if(!this.isConnected)return;
+   await this.load();
+   if(this.hub?.mis_a_jour&&this.hub.mis_a_jour!==before){this.months=undefined;return;}
+  }
  }
  private tag(k:string,why:string|null|undefined){
   return this.val(k)==null?(why?html`<span class="nk-def">${why}</span>`:nothing):html`<button type="button" class="nk-reset-s" @click=${()=>this.set(k,null)}>Rétablir</button>`;

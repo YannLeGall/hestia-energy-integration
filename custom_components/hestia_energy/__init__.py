@@ -35,6 +35,9 @@ async def async_setup_entry(hass, entry):
 async def async_unload_entry(hass, entry):
     unloaded = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
     if unloaded and getattr(entry, "runtime_data", None):
+        api = hass.data.get(API_KEY)
+        if api is not None:
+            api.detach(entry.runtime_data)
         await entry.runtime_data.async_stop()
     return unloaded
 

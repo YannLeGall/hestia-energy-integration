@@ -24,6 +24,7 @@ from homeassistant.util import dt as dt_util
 from . import hub_view, reader
 from .const import DOMAIN
 from .engine import advice, anomaly, baseline, cards, daily, health, heating, hub, solar, home as engine_home, live, phrases, report, sources, stats, tariff
+from .engine.rows import Rows, merge as merge_rows
 
 _LOGGER = logging.getLogger(__name__)
 YEAR_DAYS = 400
@@ -79,7 +80,8 @@ class EnergyCoordinator:
         self.page: sources.EnergyPage | None = None
         self.level: sources.Level | None = None
         self.extras: dict = {}
-        self.rows: dict[str, list[dict]] = {}
+        self.rows: dict[str, Rows] = {}
+        self._built_with = None          # what the home was last read from: the same again, it is not read again
         self.home: engine_home.Home | None = None
         self.offpeak: tariff.OffPeak | None = None
         self.offpeak_found: tariff.OffPeak | None = None   # learned from the meters, before the household's own hours
@@ -92,11 +94,17 @@ class EnergyCoordinator:
         self.flow = live.Flow()
         self.data: dict = {"pret": False}
         self._listeners: list = []
+        self._stop_listeners: list = []
         self._unsubs: list = []
         self._live_unsub = None
         self._last_full: datetime | None = None
         self._live_pending = None
         self._refreshing = asyncio.Lock()
+        self._stopped = False
+        self._retry = None
+        self._failed = False
+        # Each past day Hestia Weather could not give, with the day it was asked: asked again the next day only.
+        self._cold_asked: dict[date, date] = {}
 
     # --- life ---------------------------------------------------------------------------------------------------
 
@@ -120,8 +128,15 @@ class EnergyCoordinator:
                           "contrat": {"option": self.settings.get("option") or ("hphc" if {"hp", "hc"} <= periods
                                                                                 else "base" if self.page.imports else None)}})
 
+    def _background(self, coro, name: str) -> None:
+        """A task that ends with the entry: unloaded, nothing of it goes on (no live listener set again afterwards)."""
+        if self._stopped:
+            coro.close()
+            return
+        self.entry.async_create_background_task(self.hass, coro, name)
+
     async def async_start(self) -> None:
-        await reader.listen_prefs(self.hass, self._prefs_changed)
+        self._unsubs.append(await reader.listen_prefs(self.hass, self._prefs_changed))
         # The meter's period (TIC), the inverters, the pellets come from integrations that may publish their entities
         # after this one starts: looked for again once Home Assistant has started, and five minutes later.
         fired = []
@@ -138,16 +153,26 @@ class EnergyCoordinator:
         self._unsubs.append(async_call_later(self.hass, 300, again))
         self._unsubs.append(async_track_time_interval(self.hass, self._hourly, timedelta(hours=1)))
         self._unsubs.append(async_track_time_interval(self.hass, self._minute, timedelta(minutes=1)))
-        self.hass.async_create_background_task(self.async_refresh(full=True), f"{DOMAIN}_first_reports")
+        self._background(self.async_refresh(full=True), f"{DOMAIN}_first_reports")
 
     async def async_stop(self) -> None:
+        self._stopped = True
+        for stopped in list(self._stop_listeners):
+            stopped()
+        self._stop_listeners.clear()
         for unsub in self._unsubs:
             unsub()
-        if self._live_unsub:
-            self._live_unsub()
-        if self._live_pending:
-            self._live_pending()
+        for cancel in (self._live_unsub, self._live_pending, self._retry):
+            if cancel:
+                cancel()
+        self._live_unsub = self._live_pending = self._retry = None
         self._unsubs.clear()
+        self._listeners.clear()
+
+    def add_stop_listener(self, stopped):
+        """Called once when the brick stops (unloaded, reloaded): the cards follow the new one."""
+        self._stop_listeners.append(stopped)
+        return lambda: self._stop_listeners.remove(stopped) if stopped in self._stop_listeners else None
 
     def add_listener(self, update):
         self._listeners.append(update)
@@ -241,76 +266,111 @@ class EnergyCoordinator:
         if wait:
             await self.async_refresh(full=False)
         else:
-            self.hass.async_create_background_task(self.async_refresh(full=False), f"{DOMAIN}_settings_saved")
+            self._background(self.async_refresh(full=False), f"{DOMAIN}_settings_saved")
 
     # --- the reports (every hour) -------------------------------------------------------------------------------
 
     async def async_refresh(self, full: bool) -> None:
-        async with self._refreshing:
-            prefs = await reader.energy_prefs(self.hass)
-            self.page = sources.read_page(prefs)
-            self.extras = reader.detect(self.hass)
-            self.extras["prevision"] = any(m.forecasts for m in self.page.solar)
-            # The other bricks, as Home Assistant has loaded them (never guessed from entity names).
-            self.extras["meteo"] = "hestia_weather" in self.hass.config.components
-            self.extras["confort"] = "hestia_comfort" in self.hass.config.components
-            self._switch_off()
-            self.data["source"] = self._source()
-            ids = {m.stat for m in self.page.meters}
-            ids |= {e for m in self.page.meters for e in m.power.entities}
-            ids |= set(self.extras["channels"])
-            if self.extras.get("pellets"):
-                ids.add(self.extras["pellets"]["consumed"])
-            # Enedis (fait foi) when HA Linky or MyElectricalData imports it, and it is not the page's own meter.
-            in_page = {m.stat for m in self.page.meters}
-            self.reference = {k: v for k, v in (await reader.reference_statistics(self.hass)).items() if v not in in_page}
-            if not self.used("linky"):
-                self.reference = {}
-            ids |= set(self.reference.values())
-            now = dt_util.utcnow()
-            meta = await reader.metadata(self.hass, ids)
-            self.level = sources.equipment(self.page, meta)
-            start = now - timedelta(days=YEAR_DAYS if full or not self.rows else RECENT_DAYS)
-            fresh = await reader.hourly(self.hass, ids, start)
-            self.rows = fresh if full or not self.rows else _merge(self.rows, fresh, start)
-            if full:
-                self._last_full = now
-            kva = self.settings.get("kva") or self.extras.get("kva")
-            first = now - timedelta(days=YEAR_DAYS)
-            self.home = await self.hass.async_add_executor_job(
+        """The reports again. One that fails keeps the last figures, says so once in the log, and is tried again five
+        minutes later (audit of 9 Nov. 2026: a first report failing left the cards « reading » for an hour, silently)."""
+        if self._stopped:
+            return
+        try:
+            async with self._refreshing:
+                await self._refresh(full)
+        except Exception:  # noqa: BLE001 - the brick goes on with its last figures
+            if not self._failed:
+                _LOGGER.exception("Hestia Énergie : bilans non refaits, les derniers chiffres restent ; nouvel essai dans 5 min")
+            self._failed = True
+            if self._retry is None and not self._stopped:
+                self._retry = async_call_later(self.hass, 300, self._retry_due)
+            return
+        if self._failed:
+            _LOGGER.info("Hestia Énergie : bilans de nouveau à jour")
+        self._failed = False
+        if not self._stopped:
+            self._update_live()
+
+    @callback
+    def _retry_due(self, _now) -> None:
+        self._retry = None
+        self._background(self.async_refresh(full=self._last_full is None), f"{DOMAIN}_retry")
+
+    async def _refresh(self, full: bool) -> None:
+        prefs = await reader.energy_prefs(self.hass)
+        before = self.rows
+        self.page = sources.read_page(prefs)
+        self.extras = reader.detect(self.hass)
+        self.extras["prevision"] = any(m.forecasts for m in self.page.solar)
+        # The other bricks, as Home Assistant has loaded them (never guessed from entity names).
+        self.extras["meteo"] = "hestia_weather" in self.hass.config.components
+        self.extras["confort"] = "hestia_comfort" in self.hass.config.components
+        self._switch_off()
+        self.data["source"] = self._source()
+        ids = {m.stat for m in self.page.meters}
+        ids |= {e for m in self.page.meters for e in m.power.entities}
+        ids |= set(self.extras["channels"])
+        if self.extras.get("pellets"):
+            ids.add(self.extras["pellets"]["consumed"])
+        # Enedis (fait foi) when HA Linky or MyElectricalData imports it, and it is not the page's own meter.
+        in_page = {m.stat for m in self.page.meters}
+        self.reference = {k: v for k, v in (await reader.reference_statistics(self.hass)).items() if v not in in_page}
+        if not self.used("linky"):
+            self.reference = {}
+        ids |= set(self.reference.values())
+        now = dt_util.utcnow()
+        meta = await reader.metadata(self.hass, ids)
+        self.level = sources.equipment(self.page, meta)
+        start = now - timedelta(days=YEAR_DAYS if full or not self.rows else RECENT_DAYS)
+        fresh = {sid: Rows.of(values) for sid, values in (await reader.hourly(self.hass, ids, start)).items()}
+        self.rows = fresh if full or not self.rows else _merge(self.rows, fresh, start)
+        if full:
+            self._last_full = now
+        kva = self.settings.get("kva") or self.extras.get("kva")
+        first = now - timedelta(days=YEAR_DAYS)
+        # The same statistics, page and extensions as the last time: the home read then still holds (HA Linky sends
+        # once a day; at start, the two looks for a late extension). Only the reports below are made again
+        # (audit of 9 Nov. 2026: each hour read the whole year again, 13 s on the lab).
+        built_with = (prefs, kva, tuple(self.extras["channels"]), tuple(sorted(self.reference.items())),
+                      repr(self.settings.get("extensions")), repr(self.settings.get("stove_fuel")))
+        if full or self.home_raw is None or built_with != self._built_with or self.rows != before:
+            raw = await self.hass.async_add_executor_job(
                 engine_home.build, self.page, self.rows, self.tz, first, kva, self.extras["channels"])
             # Enedis fait foi (Frank, 7 Nov. 2026): the bills follow its day totals when HA Linky brings them; the
-            # page's own meters are kept to be checked against it.
-            self.home_raw = self.home
-            self.home = await self.hass.async_add_executor_job(self._follow_enedis, self.home)
-            imports = self.home.of("import")
-            peak = next((r.series for r in imports if r.meter.period == "hp"), None)
-            offpeak = next((r.series for r in imports if r.meter.period == "hc"), None)
-            self.offpeak_found = tariff.learn_offpeak(peak, offpeak, self.tz) if peak and offpeak else None
-            # The off-peak hours the household typed come first (the bill may say a few minutes more or less, H7);
-            # else those learned on the two meters.
-            self.offpeak = tariff.parse_offpeak(self.settings.get("offpeak")) or self.offpeak_found
-            # Hour by hour is proven by the statistics: HA Linky gives its older days in one step each (F1.2).
-            if self.level and not self.level.hourly:
-                self.level = dataclasses.replace(self.level, hourly=_hourly(imports, now))
-            for meter in self.page.meters:
-                for entity in meter.power.entities:
-                    if entity not in self.locality:
-                        self.locality[entity] = await reader.is_local(self.hass, entity)
-            if self.extras.get("inverter") and self.extras["inverter"] not in self.locality:
-                self.locality[self.extras["inverter"]] = await reader.is_local(self.hass, self.extras["inverter"])
-            await self._fetch_cold(now)
-            await self._fetch_colours(now)
-            self._follow_live()
-            prices, export_price = self._prices(), self._export_price()
-            self.page_prices = dict(prices)
-            self.panel_names = {c: solar.panel_name(_friendly(self.hass, c)) for c in self.extras["channels"]}
-            self.device_names = {m.stat: _device_name(_friendly(self.hass, m.stat)) for m in self.page.devices if not m.name}
-            self.inverter_silent = self._inverter_silent()
-            self.weather_cold = reader.weather_cold(self.hass) if self.used("meteo") else "non"
-            self.data.update(await self.hass.async_add_executor_job(self._reports, now, prices, export_price))
-            self.data["pret"] = True
-        self._update_live()
+            # page's own meters are kept to be checked against it. Both set together: the live part and the other
+            # bricks never see one without the other.
+            followed = await self.hass.async_add_executor_job(self._follow_enedis, raw)
+            self.home_raw, self.home = raw, followed
+            self._built_with = built_with
+        imports = self.home.of("import")
+        peak = next((r.series for r in imports if r.meter.period == "hp"), None)
+        offpeak = next((r.series for r in imports if r.meter.period == "hc"), None)
+        self.offpeak_found = tariff.learn_offpeak(peak, offpeak, self.tz) if peak and offpeak else None
+        # The off-peak hours the household typed come first (the bill may say a few minutes more or less, H7);
+        # else those learned on the two meters.
+        self.offpeak = tariff.parse_offpeak(self.settings.get("offpeak")) or self.offpeak_found
+        # Hour by hour is proven by the statistics: HA Linky gives its older days in one step each (F1.2).
+        if self.level and not self.level.hourly:
+            self.level = dataclasses.replace(self.level, hourly=_hourly(imports, now))
+        for meter in self.page.meters:
+            for entity in meter.power.entities:
+                if entity not in self.locality:
+                    self.locality[entity] = await reader.is_local(self.hass, entity)
+        if self.extras.get("inverter") and self.extras["inverter"] not in self.locality:
+            self.locality[self.extras["inverter"]] = await reader.is_local(self.hass, self.extras["inverter"])
+        await self._fetch_cold(now)
+        await self._fetch_colours(now)
+        prices, export_price = self._prices(), self._export_price()
+        self.page_prices = dict(prices)
+        self.panel_names = {c: solar.panel_name(_friendly(self.hass, c)) for c in self.extras["channels"]}
+        self.device_names = {m.stat: _device_name(_friendly(self.hass, m.stat)) for m in self.page.devices if not m.name}
+        self.inverter_silent = self._inverter_silent()
+        self.weather_cold = reader.weather_cold(self.hass) if self.used("meteo") else "non"
+        if self._stopped:
+            return
+        self._follow_live()
+        self.data.update(await self.hass.async_add_executor_job(self._reports, now, prices, export_price))
+        self.data["pret"] = True
 
     async def _fetch_colours(self, now: datetime) -> None:
         """The Tempo days' colours: what the Recorder still has, added to those already kept."""
@@ -330,8 +390,10 @@ class EnergyCoordinator:
         today = now.astimezone(self.tz).date()
         first = today - timedelta(days=YEAR_DAYS)
         wanted = [first + timedelta(days=i) for i in range((today - first).days + 1)]
-        missing = [d for d in wanted if d not in self.cold or d == today]
+        # A past day Weather could not give (before its station, a gap) is asked again the next day, not every hour.
+        missing = [d for d in wanted if d == today or (d not in self.cold and self._cold_asked.get(d) != today)]
         found = await reader.degree_days(self.hass, missing)
+        self._cold_asked.update({d: today for d in missing if d not in found and d < today})
         past = {d: v for d, v in found.items() if d < today and d not in self.cold}
         self.cold.update(found)
         if past:
@@ -433,18 +495,20 @@ class EnergyCoordinator:
         kva = self.settings.get("kva") or self.extras.get("kva")
         # A home showing the Tempo colour is on Tempo unless the household says otherwise.
         option = self.settings.get("option") or (tariff.TEMPO if self.extras.get("tempo_today") else None)
-        self.contract = report.contract_for(home, kva, self.offpeak, prices, export_price, option)
-        self.contract.colors = dict(self.colours)
+        contract = report.contract_for(home, kva, self.offpeak, prices, export_price, option)
+        contract.colors = dict(self.colours)
         local = now.astimezone(self.tz)
         # The offer the household chose (H7): the regulated tariff, or its own prices and subscription.
         offer = self.settings.get("offer")
         if offer == "autre":
             own = {k: self.settings.get(f"price_{k}") for k in ("hp", "hc", "base")}
-            self.contract.prices = {**self.contract.prices, **{k: v for k, v in own.items() if v is not None}}
-            self.contract.subscription_year = self.settings.get("subscription")
+            contract.prices = {**contract.prices, **{k: v for k, v in own.items() if v is not None}}
+            contract.subscription_year = self.settings.get("subscription")
         # The page's prices are today's (Tarif EDF): on the regulated tariff, every past day keeps its own price.
-        elif offer == "bleu" or tariff.regulated_today(self.contract, self.table, local.date()):
-            self.contract.prices = {}
+        elif offer == "bleu" or tariff.regulated_today(contract, self.table, local.date()):
+            contract.prices = {}
+        # Set whole, never changed afterwards: the live part and Hestia Comfort read it meanwhile (audit, 9 Nov. 2026).
+        self.contract = contract
         today = report.day(home, self.contract, self.table, local.date())
         yesterday = report.day(home, self.contract, self.table, local.date() - timedelta(days=1))
         # The month up to the last hour known (HA Linky: the day before): its forecast is not stretched over days not
@@ -755,7 +819,7 @@ class EnergyCoordinator:
 
 
 def _merge(old: dict, fresh: dict, start: datetime) -> dict:
-    return {sid: [r for r in old.get(sid, []) if r["start"] < start] + fresh.get(sid, []) for sid in set(old) | set(fresh)}
+    return {sid: merge_rows(old.get(sid), fresh.get(sid), start) for sid in set(old) | set(fresh)}
 
 
 def _number(state) -> float | None:
@@ -812,8 +876,8 @@ def _hours(home, day: date) -> list[dict]:
     start, end = tariff.day_bounds(day, home.tz)
     out = [{"h": h, "achat": None, "soleil": None, "revente": None} for h in range(24)]
     for key, series in (("achat", home.bought), ("soleil", home.sun), ("revente", home.sent)):
-        for hour in series.hours if series else []:
-            if start <= hour.start < end and hour.kwh is not None:
+        for hour in series.between(start, end) if series else []:
+            if hour.kwh is not None:
                 out[hour.start.astimezone(home.tz).hour][key] = round(hour.kwh, 3)
     return out
 

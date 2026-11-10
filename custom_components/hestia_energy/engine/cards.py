@@ -10,8 +10,9 @@ from calendar import monthrange
 import dataclasses
 from datetime import date, datetime, timedelta, tzinfo
 
-from . import baseline, report, stats, tariff
+from . import baseline, report, solar, stats, tariff
 from .home import Home
+from .rows import when
 from .tariff import Contract
 
 QUIET_SHARE = 0.2     # « quand tout dort »: the quietest fifth of the night hours of the window
@@ -42,10 +43,10 @@ def panel_groups(channel_rows: dict[str, list[dict]], names: dict[str, str], tz:
     out: dict[str, float] = {}
     for channel, rows in channel_rows.items():
         group = (names.get(channel) or channel).split(" · ")[0]
-        for row in rows:
-            if row.get("mean") is None or row["start"].astimezone(tz).date() != day:
+        for start, mean in solar._means(rows):
+            if when(start).astimezone(tz).date() != day:
                 continue
-            out[group] = out.get(group, 0.0) + max(0.0, row["mean"]) / 1000
+            out[group] = out.get(group, 0.0) + max(0.0, mean) / 1000
     return [{"nom": n, "kwh": round(k, 2)} for n, k in sorted(out.items(), key=lambda x: -x[1])]
 
 

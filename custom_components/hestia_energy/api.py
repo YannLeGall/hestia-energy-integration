@@ -28,6 +28,12 @@ class HestiaEnergyApi:
         self.coordinator = coordinator
         coordinator.add_listener(self._changed)
 
+    def detach(self, coordinator) -> None:
+        """The home unloaded: the other bricks get nothing rather than the figures of a brick that no longer runs."""
+        if self.coordinator is coordinator:
+            self.coordinator = None
+            self._changed()
+
     def _changed(self) -> None:
         for update in list(self._listeners):
             update()

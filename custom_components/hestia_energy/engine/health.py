@@ -15,34 +15,53 @@ from __future__ import annotations
 from datetime import date, datetime, timedelta, tzinfo
 from statistics import median
 
+from .rows import Rows, when
 from .stats import Series
 
 
-def _power_by_hour(rows: list[dict]) -> dict[datetime, float]:
-    return {r["start"]: r["mean"] for r in rows if r.get("mean") is not None}
+def _power_by_hour(rows) -> dict[float, float]:
+    """Each hour's mean power, by the hour's start in seconds."""
+    rows = Rows.of(rows)
+    means = rows.column("mean")
+    if means is None:
+        return {}
+    return {t: m for t, m in zip(rows.ts, means) if m == m}
 
 
-def _ratios(series: Series, power: dict[datetime, float], shift: int, floor_w: float) -> list[float]:
+def _ratios(series: Series, power: dict[float, float], shift: int, floor_w: float) -> list[float]:
     """Each hour's energy over the energy its power says, the power read `shift` hours earlier."""
     out = []
+    back = 3600 * shift
     for hour in series.hours:
         if hour.kwh is None or hour.kwh <= 0 or hour.hours != 1:
             continue
-        watts = power.get(hour.start - timedelta(hours=shift))
+        watts = power.get(hour.start.timestamp() - back)
         if watts is not None and abs(watts) >= floor_w:
             out.append(hour.kwh / (abs(watts) / 1000))
     return out
+
+
+class Ratios:
+    """The ratios of one meter to its power at each shift, worked out once for `scale` and `lag` together."""
+
+    def __init__(self, series: Series, power_rows, floor_w: float = 200) -> None:
+        self.series, self.power, self.floor_w, self._found = series, _power_by_hour(power_rows), floor_w, {}
+
+    def at(self, shift: int) -> list[float]:
+        if shift not in self._found:
+            self._found[shift] = _ratios(self.series, self.power, shift, self.floor_w)
+        return self._found[shift]
 
 
 # Scales a meter can be in by mistake: its median ratio to its power.
 _SCALES = (1000.0, 0.001)
 
 
-def scale(series: Series, power_rows: list[dict], floor_w: float = 200) -> float:
+def scale(series: Series, power_rows, floor_w: float = 200, ratios_: Ratios | None = None) -> float:
     """The factor that brings this meter to kWh: 1, or 1/1000 for a meter in Wh read as kWh. Needs 24 busy hours."""
-    power = _power_by_hour(power_rows)
+    found = ratios_ or Ratios(series, power_rows, floor_w)
     for shift in (0, 1, 2):
-        ratios = _ratios(series, power, shift, floor_w)
+        ratios = found.at(shift)
         if len(ratios) < 24:
             continue
         m = median(ratios)
@@ -52,16 +71,16 @@ def scale(series: Series, power_rows: list[dict], floor_w: float = 200) -> float
     return 1.0
 
 
-def lag(series: Series, power_rows: list[dict], floor_w: float = 200, factor: float = 1.0) -> int | None:
+def lag(series: Series, power_rows, floor_w: float = 200, factor: float = 1.0, ratios_: Ratios | None = None) -> int | None:
     """Hours by which the meter's statistics come after its power (0, 1 or 2), or None when its hours are too few.
 
     The lag that brings each hour's energy closest to the energy its power says, measured as the spread of the ratios
     around 1 (Frank's dishwasher: 0.84 in its own hour, 1.00 one hour later).
     """
-    power = _power_by_hour(power_rows)
+    found = ratios_ or Ratios(series, power_rows, floor_w)
     spreads = {}
     for shift in (0, 1, 2):
-        ratios = [r * factor for r in _ratios(series, power, shift, floor_w)]
+        ratios = [r * factor for r in found.at(shift)]
         if len(ratios) >= 24:
             spreads[shift] = median(abs(r - 1) for r in ratios)
     if not spreads:
@@ -81,28 +100,32 @@ def since(series: Series, start: datetime, tz: tzinfo) -> date | None:
     return first.astimezone(tz).date()
 
 
-def frozen(power_rows: list[dict], series: Series | None, hours: int = 6, factor: float = 1.0) -> list[tuple[datetime, int, float]]:
+def frozen(power_rows, series: Series | None, hours: int = 6, factor: float = 1.0) -> list[tuple[datetime, int, float]]:
     """Runs of at least `hours` hours where the power stays at one value while its own meter says otherwise.
 
     Without a meter, nothing is said: a radiator at 1 000 W for hours is not frozen. Returns (start, hours, value).
     """
     if series is None:
         return []
-    energy = {h.start: h.kwh * factor for h in series.hours if h.kwh is not None}
+    rows = Rows.of(power_rows)
+    lows, highs = rows.column("min"), rows.column("max")
+    if lows is None or highs is None:
+        return []
+    energy = {h.start.timestamp(): h.kwh * factor for h in series.hours if h.kwh is not None}
     runs, current = [], None
-    for row in power_rows:
-        flat = row.get("min") is not None and row.get("min") == row.get("max")
-        kwh = energy.get(row["start"])
-        disagrees = flat and kwh is not None and abs(kwh - abs(row["min"]) / 1000) > max(0.1, 0.5 * kwh)
-        if disagrees and current and current[2] == row["min"] and row["start"] - current[3] <= timedelta(hours=1):
-            current = (current[0], current[1] + 1, current[2], row["start"])
+    for stamp, low, high in zip(rows.ts, lows, highs):
+        flat = low == low and low == high           # NaN (no minimum) is never flat
+        kwh = energy.get(stamp)
+        disagrees = flat and kwh is not None and abs(kwh - abs(low) / 1000) > max(0.1, 0.5 * kwh)
+        if disagrees and current and current[2] == low and stamp - current[3] <= 3600:
+            current = (current[0], current[1] + 1, current[2], stamp)
             continue
         if current and current[1] >= hours:
             runs.append(current[:3])
-        current = (row["start"], 1, row["min"], row["start"]) if disagrees else None
+        current = (stamp, 1, low, stamp) if disagrees else None
     if current and current[1] >= hours:
         runs.append(current[:3])
-    return runs
+    return [(when(start), n, value) for start, n, value in runs]
 
 
 def impossible(home: dict[date, float], devices: dict[date, float], margin: float = 1.05) -> list[date]:

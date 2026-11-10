@@ -9,11 +9,17 @@ a day with an unknown hour says so, it is never made up.
 """
 from __future__ import annotations
 
+from bisect import bisect_left
 from dataclasses import dataclass, field
-from datetime import date, datetime, timedelta, tzinfo
+from datetime import date, datetime, tzinfo
+from operator import attrgetter
+
+from .rows import Rows, when
+
+_START = attrgetter("start")
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class Hour:
     start: datetime          # aware, the hour's beginning
     kwh: float | None        # None: unknown (a jump or a meter reset)
@@ -35,37 +41,69 @@ class Series:
     jumps: list[Jump] = field(default_factory=list)
     # Small steps back (a cloud meter correcting itself): read as zero, counted here.
     backs: int = 0
+    # What is worked out once from the hours (their order, each local day's total, the night hours), kept while the
+    # hours stay the same list of the same length (audit of 9 Nov. 2026: each total read the whole year again).
+    _memo: dict = field(default_factory=dict, repr=False, compare=False)
 
     def known(self) -> list[Hour]:
         return [h for h in self.hours if h.kwh is not None]
+
+    def memo(self, key, make):
+        """`make()` once for these hours; worked out again when the hours change (another list, another length)."""
+        stamp = (id(self.hours), len(self.hours))
+        if self._memo.get("_stamp") != stamp:
+            self._memo = {"_stamp": stamp}
+        if key not in self._memo:
+            self._memo[key] = make()
+        return self._memo[key]
+
+    def between(self, start: datetime, end: datetime) -> list[Hour]:
+        """The hours starting from `start` (included) to `end` (excluded), found by halving: the hours are in order."""
+        hours = self.hours
+        if not self.memo("ordered", lambda: all(a.start <= b.start for a, b in zip(hours, hours[1:]))):
+            return [h for h in hours if start <= h.start < end]
+        return hours[bisect_left(hours, start, key=_START):bisect_left(hours, end, key=_START)]
 
 
 # A meter going back by less than this in an hour is a correction, read as zero; more is a reset, the hour unknown.
 BACK_TOLERANCE_KWH = 2.0
 
 
-def energy(stat: str, rows: list[dict], limit_kwh=None) -> Series:
+def steps(rows) -> list[tuple[float, float, int]]:
+    """Each step of the meter's sum from one row to the next: (start of the hour in seconds, kWh, hours it covers)."""
+    rows = Rows.of(rows)
+    sums, ts = rows.column("sum"), rows.ts
+    out = []
+    if sums is None:
+        return out
+    for i in range(1, len(ts)):
+        a, b = sums[i - 1], sums[i]
+        if a != a or b != b:          # NaN: no sum that hour
+            continue
+        out.append((ts[i], b - a, max(1, round((ts[i] - ts[i - 1]) / 3600))))
+    return out
+
+
+def energy(stat: str, rows, limit_kwh=None, steps_=None) -> Series:
     """Each hour's energy from the recorder's rows ({start, sum}, in order).
 
     `limit_kwh`: the most this meter can pass in one hour — a number, or a function of the hour's start (the export
-    limited by that hour's sun). None: the meter's own history decides (`robust_limit`).
+    limited by that hour's sun); a function may also read the hour by its start in seconds (`by_ts`). None: the
+    meter's own history decides (`robust_limit`). `steps_`: the rows' steps when already worked out.
     """
     series = Series(stat)
-    steps = []
-    for before, after in zip(rows, rows[1:]):
-        if before.get("sum") is None or after.get("sum") is None:
-            continue
-        span = max(1, round((after["start"] - before["start"]) / timedelta(hours=1)))
-        steps.append((after["start"], after["sum"] - before["sum"], span))
+    found = steps(rows) if steps_ is None else steps_
     if limit_kwh is None:
-        fixed = robust_limit([d for _, d, span in steps if span == 1])
-        limit = lambda start: fixed  # noqa: E731
+        fixed = robust_limit([d for _, d, span in found if span == 1])
+        limit = lambda stamp: fixed  # noqa: E731
     elif callable(limit_kwh):
-        limit = limit_kwh
+        by_ts = getattr(limit_kwh, "by_ts", None)
+        limit = by_ts if by_ts is not None else (lambda stamp: limit_kwh(when(stamp)))
     else:
-        limit = lambda start: limit_kwh  # noqa: E731
-    for start, delta, span in steps:
-        most = limit(start)
+        limit = lambda stamp: limit_kwh  # noqa: E731
+    for stamp, delta, span in found:
+        start = when(stamp)
+        most = limit(stamp)
         if delta < 0:
             if -delta <= BACK_TOLERANCE_KWH:
                 series.backs += 1
@@ -107,18 +145,26 @@ class Total:
 def total(series: Series, start: datetime, end: datetime) -> Total:
     """Energy between two instants (start included, end excluded)."""
     kwh, unknown, hours = 0.0, 0, 0
-    for hour in series.hours:
-        if start <= hour.start < end:
-            hours += hour.hours
-            if hour.kwh is None:
-                unknown += hour.hours
-            else:
-                kwh += hour.kwh
+    for hour in series.between(start, end):
+        hours += hour.hours
+        if hour.kwh is None:
+            unknown += hour.hours
+        else:
+            kwh += hour.kwh
     return Total(kwh, unknown, hours)
 
 
 def days(series: Series, tz: tzinfo) -> dict[date, Total]:
     """Each local day's total (the day of the hour's beginning, in the home's time zone)."""
+    return dict(series.memo(("days", tz), lambda: _days(series, tz)))
+
+
+def local_hours(series: Series, tz: tzinfo) -> list[tuple[datetime, Hour]]:
+    """Each hour with its local start, worked out once for these hours."""
+    return series.memo(("local", tz), lambda: [(h.start.astimezone(tz), h) for h in series.hours])
+
+
+def _days(series: Series, tz: tzinfo) -> dict[date, Total]:
     out: dict[date, tuple] = {}
     for hour in series.hours:
         day = hour.start.astimezone(tz).date()
@@ -164,12 +210,27 @@ def limit_from_power(rows: list[dict], lag_hours: int = 2, margin: float = 1.5, 
     Frank's fridge: about 0.02 kWh an hour, and 87 hours of 27 to 300 kWh when its meter took its index again.
     Returns a function of the hour's start, for `energy`; None for an hour without power (no limit then).
     """
-    peaks = {r["start"]: r["max"] for r in rows if r.get("max") is not None}
+    rows = Rows.of(rows)
+    highest = rows.column("max")
+    # The highest power of each hour and of the `lag_hours` before it, worked out in one pass over the hours.
+    window: dict[float, float] = {}
+    if highest is not None:
+        for stamp, peak in zip(rows.ts, highest):
+            if peak != peak:
+                continue
+            peak = abs(peak)
+            for k in range(lag_hours + 1):
+                key = stamp + 3600 * k
+                if peak > window.get(key, -1.0):
+                    window[key] = peak
+
+    def by_ts(stamp: float) -> float | None:
+        peak = window.get(stamp)
+        if peak is None:
+            return None
+        return (peak / 1000 * margin + slack_kwh) / factor
 
     def limit(start: datetime) -> float | None:
-        seen = [peaks.get(start - timedelta(hours=k)) for k in range(lag_hours + 1)]
-        seen = [abs(p) for p in seen if p is not None]
-        if not seen:
-            return None
-        return (max(seen) / 1000 * margin + slack_kwh) / factor
+        return by_ts(start.timestamp())
+    limit.by_ts = by_ts
     return limit

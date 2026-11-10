@@ -11,6 +11,7 @@ from datetime import date, timedelta
 import statistics
 
 from .heating import Learned
+from .rows import NAN, Rows
 
 SHARE = 0.4      # the difference, as a share of the usual day
 MIN_KWH = 5.0    # and at least this much, so a small home is not flagged for 2 kWh
@@ -62,14 +63,22 @@ MIN_RUNS = 20        # runs seen before its usual length is trusted
 ALWAYS_ON = 0.5      # on more than half the hours: a box, a server; never « forgotten »
 
 
+def _column(rows):
+    """The device's mean power hour by hour, NaN where unknown."""
+    if not isinstance(rows, Rows):
+        return [NAN if r.get("mean") is None else r["mean"] for r in rows]
+    found = rows.column("mean")
+    return found if found is not None else []
+
+
 def _runs(rows: list[dict]) -> tuple[list[int], int, int]:
     """The device's runs (hours on in a row), the hours on and the hours known."""
     runs, current, on, known = [], 0, 0, 0
-    for row in rows:
-        if row.get("mean") is None:
+    for mean in _column(rows):
+        if mean != mean:              # NaN: no mean that hour
             continue
         known += 1
-        if row["mean"] >= ON_W:
+        if mean >= ON_W:
             current += 1
             on += 1
         elif current:
@@ -93,8 +102,8 @@ def run_limit(rows: list[dict]) -> int | None:
 def trailing_hours(rows: list[dict]) -> int:
     """The whole hours the device has been on in a row, up to its last known hour."""
     count = 0
-    for row in reversed(rows):
-        if row.get("mean") is None or row["mean"] < ON_W:
+    for mean in reversed(_column(rows)):
+        if mean != mean or mean < ON_W:
             break
         count += 1
     return count

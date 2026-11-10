@@ -13,6 +13,12 @@ from .const import DOMAIN
 from .engine import hub, report
 
 RUBRIQUES = ("soleil", "chauffage", "eau", "contrat", "appareils", "veille", "pointe")
+VIEW_VERSION = 1
+# What the cards read (card/src/card.ts): the reports' findings, the sources, the extensions and the hub's figures stay
+# out of their view (33 kB → about 10 kB; audit of 9 Nov. 2026).
+CARD_KEYS = ("pret", "palier", "equipement", "direct", "jour", "hier", "mois", "mois_an_dernier", "projection", "jusqu_ici",
+             "dernier_jour", "pistes", "veille", "veille_historique", "heures_creuses", "contrat", "heures", "eau",
+             "chauffage", "panneaux", "soleil_jour", "appareils_jour", "pointe")
 
 
 def _coordinator(hass):
@@ -21,7 +27,7 @@ def _coordinator(hass):
 
 
 def async_setup_websocket(hass) -> None:
-    for command in (ws_view, ws_detail, ws_periods, ws_sources, ws_simulate, ws_hub, ws_settings, ws_set_settings):
+    for command in (ws_view, ws_subscribe, ws_detail, ws_periods, ws_sources, ws_simulate, ws_hub, ws_settings, ws_set_settings):
         websocket_api.async_register_command(hass, command)
 
 
@@ -34,6 +40,55 @@ def ws_view(hass, connection, msg):
         connection.send_error(msg["id"], "not_ready", "Hestia Énergie n'est pas activée.")
         return
     connection.send_result(msg["id"], {"version": 1, **c.data})
+
+
+def card_view(data: dict) -> dict:
+    return {k: data[k] for k in CARD_KEYS if k in data}
+
+
+@websocket_api.websocket_command({vol.Required("type"): "hestia_energy/subscribe"})
+@callback
+def ws_subscribe(hass, connection, msg):
+    """The cards' view, shared by every card of a dashboard (card/src/stream.ts): whole once, then only its parts that
+    changed, as soon as they change (« en ce moment » every 10 s at most). Nine cards used to ask the whole 33 kB view
+    each minute, each on its own (audit of 9 Nov. 2026). When the brick stops (reloaded), `reload`: the cards follow
+    the new one a moment later."""
+    c = _coordinator(hass)
+    if c is None:
+        connection.send_error(msg["id"], "not_ready", "Hestia Énergie n'est pas activée.")
+        return
+    sent: dict = {}
+
+    @callback
+    def send() -> None:
+        view = card_view(c.data)
+        before = sent.get("view")
+        if before is not None:
+            changed = {k: v for k, v in view.items() if before.get(k) != v}
+            removed = [k for k in before if k not in view]
+            if not changed and not removed:
+                return
+            sent["view"] = view
+            connection.send_message(websocket_api.event_message(msg["id"], {"version": VIEW_VERSION, "changes": changed,
+                                                                            "removed": removed}))
+        else:
+            sent["view"] = view
+            connection.send_message(websocket_api.event_message(msg["id"], {"version": VIEW_VERSION, "view": view}))
+
+    @callback
+    def stopped() -> None:
+        connection.send_message(websocket_api.event_message(msg["id"], {"version": VIEW_VERSION, "reload": True}))
+
+    remove_view, remove_stop = c.add_listener(send), c.add_stop_listener(stopped)
+
+    @callback
+    def unsubscribe() -> None:
+        remove_view()
+        remove_stop()
+
+    connection.subscriptions[msg["id"]] = unsubscribe
+    connection.send_result(msg["id"])
+    send()
 
 
 @websocket_api.websocket_command({vol.Required("type"): "hestia_energy/detail", vol.Required("rubrique"): vol.In(RUBRIQUES)})
@@ -80,6 +135,9 @@ async def ws_periods(hass, connection, msg):
         return
     if end < start or (end - start).days > 800:
         connection.send_error(msg["id"], "invalid", "Une période de deux ans au plus.")
+        return
+    if msg["pas"] == "jour" and (end - start).days > 400:
+        connection.send_error(msg["id"], "invalid", "Jour par jour : une année au plus.")
         return
     rows = await hass.async_add_executor_job(report.periods, c.home, c.contract, c.table, start, end, msg["pas"])
     connection.send_result(msg["id"], {"pas": msg["pas"], "periodes": [p.as_dict() for p in rows]})

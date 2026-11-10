@@ -15,9 +15,10 @@ The home's consumption is bought + produced − sent: the page's own definition.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import date, datetime, timedelta, timezone, tzinfo
+from datetime import date, datetime, timezone, tzinfo
 
 from . import health, stats
+from .rows import Rows, when
 from .sources import EnergyPage, Meter
 from .stats import Hour, Series, Total
 
@@ -93,14 +94,19 @@ def _sun_limit(sun: Series | None, doubtful: set, fallback: float | None, margin
     """
     if sun is None:
         return fallback
-    produced = {h.start: h.kwh for h in sun.hours if h.kwh is not None}
+    produced = {h.start.timestamp(): h.kwh for h in sun.hours if h.kwh is not None}
+    unsure = {t.timestamp() for t in doubtful}
 
-    def limit(start: datetime) -> float | None:
-        if any(start - timedelta(hours=k) in doubtful for k in range(3)):
+    def by_ts(stamp: float) -> float | None:
+        if stamp in unsure or stamp - 3600 in unsure or stamp - 7200 in unsure:
             return fallback
-        seen = [produced.get(start - timedelta(hours=k)) for k in range(3)]
+        seen = [produced.get(stamp - 3600 * k) for k in range(3)]
         seen = [v for v in seen if v is not None]
         return sum(seen) * margin + slack if seen else fallback
+
+    def limit(start: datetime) -> float | None:
+        return by_ts(start.timestamp())
+    limit.by_ts = by_ts
     return limit
 
 
@@ -110,7 +116,12 @@ def inverter_energy(rows: dict[str, list[dict]], channels: list[str]) -> Series 
     A channel missing in an hour takes its sibling's value (the other input of the same inverter, « _ch1 » / « _ch2 »),
     never zero while the others produce (LISEZMOI: one East channel has 5 070 hours against 8 375).
     """
-    means = {c: {r["start"]: r["mean"] for r in rows.get(c, []) if r.get("mean") is not None} for c in channels}
+    means = {}
+    for c in channels:
+        found = Rows.of(rows.get(c, []))
+        column = found.column("mean")
+        if column is not None:
+            means[c] = {t: m for t, m in zip(found.ts, column) if m == m}
     means = {c: m for c, m in means.items() if m}
     if not means:
         return None
@@ -127,7 +138,7 @@ def inverter_energy(rows: dict[str, list[dict]], channels: list[str]) -> Series 
                 unknown = any(v > 5 for v in others)
                 value = 0.0
             total += max(0.0, value) / 1000
-        out.hours.append(Hour(start, None if unknown else total))
+        out.hours.append(Hour(when(start), None if unknown else total))
     return out
 
 
@@ -170,12 +181,14 @@ def build(page: EnergyPage, rows: dict[str, list[dict]], tz: tzinfo, start: date
         if power_id and not power:
             home.findings.append(Finding("p_sans_statistiques", power_id, {"nom": meter.name or power_id}))
         factor, lag = 1.0, None
+        steps = stats.steps(own)
         if own_power and power:
-            raw = stats.energy(meter.stat, own, float("inf"))
-            factor = health.scale(raw, power)
-            lag = health.lag(raw, power, factor=factor)
+            raw = stats.energy(meter.stat, own, float("inf"), steps)
+            ratios = health.Ratios(raw, power)
+            factor = health.scale(raw, power, ratios_=ratios)
+            lag = health.lag(raw, power, factor=factor, ratios_=ratios)
             limit = stats.limit_from_power(power, factor=factor)
-        series = _scaled(stats.energy(meter.stat, own, limit), factor)
+        series = _scaled(stats.energy(meter.stat, own, limit, steps), factor)
         reading = Reading(meter, series, factor, lag)
         home.readings[meter.stat] = reading
         name = meter.name or meter.stat
@@ -203,7 +216,7 @@ def build(page: EnergyPage, rows: dict[str, list[dict]], tz: tzinfo, start: date
         days = sorted({h.start.astimezone(tz).date() for h, p in zip(home.sun.hours, page_sun.hours) if h is not p})
         home.findings.append(Finding("p_soleil_onduleurs", "", {"heures": taken, "jours": len(days), "liste": days}))
     # Hours the page says no sun and the inverters say nothing (OpenDTU offline, 11 to 18 March): the sun is not known.
-    present = {t for c in inverters for t in (r["start"] for r in rows.get(c, []))}
+    present = {when(t) for c in inverters for t in Rows.of(rows.get(c, [])).ts}
     doubtful = {h.start for h in (home.sun.hours if home.sun else []) if inverters and h.kwh == 0 and h.start not in present}
     fallback = {m.stat: stats.robust_limit([h.kwh for h in stats.energy(m.stat, rows[m.stat], float("inf")).known()])
                 for m in page.exports if rows.get(m.stat)}

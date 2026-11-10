@@ -91,7 +91,7 @@ class FranksHome(unittest.IsolatedAsyncioTestCase):
         return {i: [{**r, "start": r["start"] + shift} for r in v if r["start"] + shift >= start] for i, v in rows.items() if i in ids}
 
     async def _listen(self, hass, callback):
-        return None
+        return lambda: None
 
     async def _local(self, hass, entity_id):
         return next((v for k, v in LOCAL.items() if k in entity_id), None)
@@ -194,6 +194,37 @@ class FranksHome(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(any(c["id"] == "p_unite" for c in connection.results[3]["constats"]))
         websocket.ws_simulate(self.hass, connection, {"id": 4, "type": "hestia_energy/simulate"})
         self.assertEqual(connection.errors[4], "not_supported")
+
+    async def test_the_cards_follow_one_subscription(self):
+        """Lot 4 of the audit (9 Nov. 2026): the cards' view whole once, then only what changed, and `reload` when the
+        brick stops; the reports' findings stay out of it."""
+        entry, coordinator = await self.setup()
+        from custom_components.hestia_energy import websocket
+
+        class Connection:
+            def __init__(self):
+                self.subscriptions, self.events, self.results = {}, [], {}
+
+            def send_result(self, ident, result=None):
+                self.results[ident] = result
+
+            def send_message(self, message):
+                self.events.append(message["event"])
+
+        connection = Connection()
+        websocket.ws_subscribe(self.hass, connection, {"id": 7, "type": "hestia_energy/subscribe"})
+        first = connection.events[0]["view"]
+        self.assertTrue(first["pret"])
+        self.assertNotIn("constats", first)
+        self.assertLess(len(json.dumps(first)), len(json.dumps(coordinator.data)) / 2)
+        coordinator._notify()                       # nothing changed: nothing sent
+        self.assertEqual(len(connection.events), 1)
+        coordinator.data["direct"] = {**coordinator.data["direct"], "achat_w": 1234.0}
+        coordinator._notify()
+        self.assertEqual(set(connection.events[1]["changes"]), {"direct"})
+        self.assertTrue(await self.hass.config_entries.async_unload(entry.entry_id))
+        self.assertEqual(connection.events[-1], {"version": 1, "reload": True})
+        connection.subscriptions[7]()
 
     async def test_the_hub_tab(self):
         """The Énergie tab of the hub (INTERFACE.md § 5): Frank's sources, devices, settings found, things to mend."""
@@ -376,6 +407,77 @@ class FranksHome(unittest.IsolatedAsyncioTestCase):
         common = [d for d in days_f if d in days_r and days_r[d].complete]
         self.assertGreater(sum(days_f[d].kwh for d in common), sum(days_r[d].kwh for d in common) * 1.02)
         self.assertTrue(any(c["id"] == "p_reference_ecart" for c in coordinator.data["constats"]))
+
+    async def test_an_unloaded_home_leaves_nothing_behind(self):
+        """Audit of 9 Nov. 2026: unloaded, the brick stops listening, gives the other bricks nothing, and a report still
+        under way never follows the live entities again."""
+        entry, coordinator = await self.setup()
+        api = self.hass.data[API_KEY]
+        self.assertIs(api.coordinator, coordinator)
+        self.assertIsNotNone(coordinator._live_unsub)
+        self.assertTrue(await self.hass.config_entries.async_unload(entry.entry_id))
+        self.assertIsNone(api.coordinator)
+        self.assertIsNone(api.tariff())
+        self.assertIsNone(coordinator._live_unsub)
+        self.assertEqual(coordinator._listeners, [])
+        await coordinator.async_refresh(full=False)
+        self.assertIsNone(coordinator._live_unsub)
+
+    async def test_a_failing_report_keeps_the_last_figures(self):
+        """A report that fails (an unforeseen value) keeps what was shown, and is tried again five minutes later."""
+        from custom_components.hestia_energy.engine import home as engine_home
+        _, coordinator = await self.setup()
+        shown = coordinator.data["mois"]
+        with patch.object(engine_home, "build", side_effect=ValueError("donnée imprévue")), \
+                self.assertLogs("custom_components.hestia_energy.coordinator", "ERROR"):
+            await coordinator.async_refresh(full=True)
+        self.assertTrue(coordinator.data["pret"])
+        self.assertEqual(coordinator.data["mois"], shown)
+        self.assertIsNotNone(coordinator._retry)
+        await coordinator.async_refresh(full=False)
+        self.assertFalse(coordinator._failed)
+
+
+class EnergyPageListener(unittest.IsolatedAsyncioTestCase):
+    """The Energy page keeps its listeners for good: the brick's relay holds it weakly and leaves the list at unload."""
+
+    async def test_the_listener_goes_with_the_brick(self):
+        import gc
+
+        class Manager:
+            def __init__(self):
+                self._update_listeners = []
+
+            def async_listen_updates(self, listener):
+                self._update_listeners.append(listener)
+
+        class Brick:
+            def __init__(self):
+                self.calls = 0
+
+            async def changed(self):
+                self.calls += 1
+
+        manager, brick = Manager(), Brick()
+
+        async def get_manager(hass):
+            return manager
+
+        with patch("homeassistant.components.energy.data.async_get_manager", get_manager):
+            stop = await reader.listen_prefs(None, brick.changed)
+        await manager._update_listeners[0]()
+        self.assertEqual(brick.calls, 1)
+        relay = manager._update_listeners[0]
+        stop()
+        self.assertEqual(manager._update_listeners, [])
+        await relay()
+        self.assertEqual(brick.calls, 1)
+        # Even left in the list, the relay never keeps the brick alive.
+        with patch("homeassistant.components.energy.data.async_get_manager", get_manager):
+            await reader.listen_prefs(None, Brick().changed)
+        gc.collect()
+        await manager._update_listeners[0]()
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -29,7 +29,20 @@ def load_regulated(path: Path = _TABLE) -> dict:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
+_PERIODS: dict[tuple[int, date], dict | None] = {}
+
+
 def _period_of(table: dict, day: date) -> dict | None:
+    """The table's period holding that day, looked up once per day (each hour of a year asked it again before)."""
+    key = (id(table), day)
+    if key not in _PERIODS:
+        if len(_PERIODS) > 5000:
+            _PERIODS.clear()
+        _PERIODS[key] = _find_period(table, day)
+    return _PERIODS[key]
+
+
+def _find_period(table: dict, day: date) -> dict | None:
     for period in table.get("periodes", []):
         start = date.fromisoformat(period["debut"])
         end = date.fromisoformat(period["fin"]) if period.get("fin") else None
@@ -223,9 +236,7 @@ def cost(contract: Contract, table: dict, tz: tzinfo, metered: list[tuple[Series
     """
     eur, unknown_kwh, unknown_hours = 0.0, 0.0, 0
     for series, period in metered:
-        for hour in series.hours:
-            if not (start <= hour.start < end):
-                continue
+        for hour in series.between(start, end):
             if hour.kwh is None:
                 unknown_hours += hour.hours
                 continue
