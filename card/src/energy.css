@@ -243,3 +243,4 @@ button.piste:focus-visible { outline:2px solid var(--nw-accent); outline-offset:
 .smonths .sm { display:grid; grid-template-rows:1fr auto; height:100%; gap:4px; text-align:center; }
 .smonths .sm i { align-self:end; border-radius:4px 4px 2px 2px; background:var(--nw-sun); }
 .smonths .sm small { font-size:var(--nw-fs-small); color:var(--nw-fg2); }
+.u-kva { margin-top:auto; padding-top:6px; }

@@ -49,7 +49,8 @@ type View={pret:boolean;palier:number;equipement:{direct?:boolean;soleil?:boolea
 /** « Votre contrat, bien utilisé » (engine/habits.py): the last 12 months. */
 type Device={nom:string;type:string;kwh:number;soleil:number;nuit:number;pleines:number;pleines_kwh:number;euros_an:number};
 type Usage={jours:number;part_hc:number;seuil_hc:number|null;part_hc_chauffe_eau:number|null;base_de_plus:number|null;
- prix:{soleil:number|null;hc:number;hp:number};appareils:Device[];euros_an:number;soleil_mois:{mois:string;jours:number;sur:number}[]};
+ prix:{soleil:number|null;hc:number;hp:number};appareils:Device[];euros_an:number;soleil_mois:{mois:string;jours:number;sur:number}[];
+ puissance?:{kva:number;jours:number;pointe_w:number;plus_bas:{kva:number;jours_au_dessus:number;euros_an:number|null}}|null};
 type Config={type:string;card?:string;name?:string};
 
 const RUBRICS=['soleil','chauffage','veille','eau','appareils','pointe','contrat'] as const;
@@ -453,11 +454,15 @@ class HestiaEnergyCard extends LitElement {
      ${u.seuil_hc!=null?html`<span class="mark" style="left:${Math.min(100,u.seuil_hc*100)}%"></span>`:nothing}</div>
     <div class="track-l"><span>sur 12 mois</span>${u.seuil_hc!=null?html`<span>rentable dès <b>${pc(u.seuil_hc)} %</b></span>`:nothing}</div>
     ${month!=null&&Math.abs(month-u.part_hc)>=.05?html`<p class="u-n">Ce mois-ci : ${pc(month)} %.${month<u.part_hc&&heater?' En hiver, le chauffe-eau chauffe sans soleil, en heures pleines.':''}</p>`:nothing}</div>`;
+  const pw=u.puissance,lo=pw?.plus_bas;
+  const kva=pw&&lo?html`<p class="u-n u-kva">${lo.jours_au_dessus===0&&lo.euros_an!=null&&lo.euros_an>=5
+    ?html`Puissance : <b>${lo.kva} kVA suffiraient</b>, ${num(lo.euros_an,0)} € de moins par an d'abonnement. Votre plus forte pointe : ${kw(pw.pointe_w)} kW.`
+    :html`Puissance : <b>gardez ${pw.kva} kVA</b>. La maison a dépassé ${lo.kva} kW ${lo.jours_au_dessus} jour${lo.jours_au_dessus>1?'s':''} en 12 mois.`}</p>`:nothing;
   const more=u.base_de_plus,saves=heater!=null&&more!=null&&more<0&&heater.euros_an>-more;
   const verdict=more==null?nothing:more>=0?html`<div class="u-verdict good"><p class="u-k">Votre option heures creuses</p><p class="u-big">C'est la bonne</p>
-    <p class="u-n">En Base, ces 12 mois auraient coûté <b>${eur(more)} € de plus</b>.${heater?html` Avec le chauffe-eau ${when}, l'écart passerait à <b>${num(more+heater.euros_an,0)} €</b>.`:''}</p></div>`
+    <p class="u-n">En Base, ces 12 mois auraient coûté <b>${eur(more)} € de plus</b>.${heater?html` Avec le chauffe-eau ${when}, l'écart passerait à <b>${num(more+heater.euros_an,0)} €</b>.`:''}</p>${kva}</div>`
    :html`<div class="u-verdict"><p class="u-k">Votre option heures creuses</p><p class="u-big">${saves?'Rentable, si…':'La Base coûterait moins'}</p>
-    <p class="u-n">En Base, ces 12 mois auraient coûté <b>${eur(-more)} € de moins</b>.${saves?` Avec le chauffe-eau ${when}, les heures creuses redeviendraient rentables.`:''}</p></div>`;
+    <p class="u-n">En Base, ces 12 mois auraient coûté <b>${eur(-more)} € de moins</b>.${saves?` Avec le chauffe-eau ${when}, les heures creuses redeviendraient rentables.`:''}</p>${kva}</div>`;
   const row=(ic:string,c:string,t:string,w:unknown,e:number)=>html`<button class="piste" style="--c:var(${c})" @click=${()=>{this._open='contrat';}}>
     <span class="ico" style="--c:var(${c})">${icon(ic)}</span><span class="pt">${t}</span><span class="pw">${w}</span>
     <span class="pe"><b>${num(e,0)} €</b><small>par an</small></span></button>`;
@@ -466,7 +471,9 @@ class HestiaEnergyCard extends LitElement {
     html`<b>${kwh(heater.pleines_kwh)} kWh</b> par an pris en heures pleines${sun?', sans soleil':''}.${sun&&heater.soleil>=.1?` Déjà ${pc(heater.soleil)} % au soleil.`:''}`,heater.euros_an):nothing,
    machines.length?row('clock','--nw-home',`${names(machines.map(m=>m.nom))} : ${sun?`au soleil, sinon ${after}`:after}`,
     `En heures pleines${sun?' sans soleil':''} : `+machines.map(m=>`${m.nom.toLowerCase()} ${pc(m.pleines)} %`).join(', ')+' du temps.',mGain):nothing];
-  return html`<div class="usage"><div class="u-top">${gauge}${verdict}</div><div class="pistes">${rows}</div></div>`;
+  const side=verdict===nothing?(pw&&lo?html`<div class="u-verdict"><p class="u-k">Votre contrat</p>${kva}</div>`:nothing)
+   :html`${verdict}`;
+  return html`<div class="usage"><div class="u-top">${gauge}${side}</div><div class="pistes">${rows}</div></div>`;
  }
  /** « Quand tournent vos machines » (maquette C): each device that can wait, its year in the sun, at night and in paid
      peak hours; then each month's days with sun to spare for a machine. */

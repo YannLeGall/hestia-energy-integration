@@ -577,6 +577,11 @@ class EnergyCoordinator:
         key = (local.date(), id(home), self.contract.option, self.offpeak)
         if getattr(self, "_usage_key", None) != key:
             self._usage, self._usage_key = habits.usage(home, self.contract, self.table, now, self.device_names), key
+            if self._usage is not None:
+                grid = {(m.power.rate_from, False) if m.power.rate_from else (m.power.rate, m.power.inverted)
+                        for m in self.page.imports if m.power.rate_from or m.power.rate}
+                self._usage["puissance"] = habits.power([(self.rows[e], inv) for e, inv in grid if e in self.rows],
+                                                        self.contract, self.table, now, self.tz)
         # What « À régler » lists: the card's « Un capteur… » line and the binary sensor say the same, no more.
         to_mend = hub_view.pending(self, findings)
         # What a kWh of sun kept saves: the daytime price (peak hours, or Base).

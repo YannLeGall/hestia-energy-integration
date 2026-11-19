@@ -68,5 +68,35 @@ class Usage(unittest.TestCase):
         self.assertIsNone(habits.usage(home(), contract, self.table, NOW))
 
 
+class Power(unittest.TestCase):
+    """9 kVA: is 6 kVA enough? Each day's highest power bought over the year, a glitch above twice the kVA left out."""
+
+    def rows(self, peaks):
+        start = (NOW - timedelta(days=len(peaks))).replace(hour=12)
+        return [{"start": (start + timedelta(days=k)).timestamp(), "max": w, "min": 0.0, "mean": w / 3}
+                for k, w in enumerate(peaks)]
+
+    def setUp(self):
+        self.table = tariff.load_regulated()
+        self.contract = tariff.Contract(tariff.HPHC, 9, tariff.parse_offpeak("0:13-8:20"))
+
+    def test_days_above_the_power_just_below(self):
+        peaks = [4000.0] * 300 + [7000.0] * 62 + [27753.0]
+        found = habits.power([(self.rows(peaks), False)], self.contract, self.table, NOW, PARIS)
+        self.assertEqual(found["plus_bas"]["kva"], 6)
+        self.assertEqual(found["plus_bas"]["jours_au_dessus"], 62)
+        self.assertEqual(found["pointe_w"], 7000)
+        self.assertGreater(found["plus_bas"]["euros_an"], 20)
+
+    def test_an_inverted_sensor_reads_its_lowest(self):
+        rows = [{**r, "max": 0.0, "min": -r["max"]} for r in self.rows([4000.0] * 120)]
+        found = habits.power([(rows, True)], self.contract, self.table, NOW, PARIS)
+        self.assertEqual(found["plus_bas"]["jours_au_dessus"], 0)
+        self.assertEqual(found["pointe_w"], 4000)
+
+    def test_too_few_days(self):
+        self.assertIsNone(habits.power([(self.rows([4000.0] * 30), False)], self.contract, self.table, NOW, PARIS))
+
+
 if __name__ == "__main__":
     unittest.main()

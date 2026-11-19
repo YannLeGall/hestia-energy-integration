@@ -21,6 +21,7 @@ import dataclasses
 
 from . import report, tariff
 from .advice import kind_of
+from .rows import Rows
 
 SUN_KWH = 0.3              # an hour sending this much: the sun is in excess, a machine would run on it
 SPARE_KWH = 1.0            # an hour sending this much: enough sun for a machine's cycle…
@@ -131,6 +132,45 @@ def usage(home, contract, table, now: datetime, names: dict | None = None) -> di
         "euros_an": round(sum(d["euros_an"] for d in devices), 2),
         "soleil_mois": months,
     }
+
+
+KVAS = (3, 6, 9, 12, 15, 18, 24, 30, 36)
+MIN_PEAK_DAYS = 90         # three months of daily peaks at least before a word on the power
+
+
+def power(rows: list[tuple], contract, table, now: datetime, tz) -> dict | None:
+    """Is the subscribed power the right one? Each day's highest power bought (the hourly « max » of the page's live
+    grid power, the Linky cutting above its kVA), over the last twelve months, against the power just below:
+    how many days went above it, and what its subscription would save a year. A reading above twice the subscribed
+    power is a glitch, not a peak (prod, 30 Oct. 2026: 27 753 W on 9 kVA)."""
+    kva = contract.kva
+    if not kva or kva not in KVAS or KVAS.index(kva) == 0:
+        return None
+    since = (now - YEAR).timestamp()
+    days: dict[date, float] = {}
+    for found, inverted in rows:
+        found = Rows.of(found) if not isinstance(found, Rows) else found
+        # An inverted sensor reads the purchases below zero: its lowest is the highest bought.
+        highest = found.column("min" if inverted else "max")
+        if highest is None:
+            continue
+        for stamp, peak in zip(found.ts, highest):
+            peak = -peak if inverted else peak
+            if stamp < since or peak != peak or peak <= 0 or peak > 2 * kva * 1000:
+                continue
+            day = datetime.fromtimestamp(stamp, tz).date()
+            if peak > days.get(day, 0.0):
+                days[day] = peak
+    if len(days) < MIN_PEAK_DAYS:
+        return None
+    lower = KVAS[KVAS.index(kva) - 1]
+    today = now.astimezone(tz).date()
+    option = contract.option if contract.option in (tariff.BASE, tariff.HPHC, tariff.TEMPO) else tariff.HPHC
+    now_year = tariff.regulated_subscription(table, today, option, kva)
+    lower_year = tariff.regulated_subscription(table, today, option, lower)
+    return {"kva": kva, "jours": len(days), "pointe_w": round(max(days.values())),
+            "plus_bas": {"kva": lower, "jours_au_dessus": sum(1 for w in days.values() if w > lower * 1000),
+                         "euros_an": None if now_year is None or lower_year is None else round(now_year - lower_year, 2)}}
 
 
 def _sun_months(spare: dict[date, int], days: set[date]) -> list[dict]:

@@ -4,6 +4,7 @@
 
 - « Votre contrat, bien utilisé », dans la carte complète : sur les 12 derniers mois, la part de vos achats en heures creuses face à la part à partir de laquelle elles rapportent, et si votre option est la bonne (ce qu'aurait coûté la Base). Jamais sur un seul mois : en hiver, la part des heures creuses baisse.
 - Pour le chauffe-eau et les machines (lave-linge, lave-vaisselle, sèche-linge) : ce qu'ils prennent au soleil, la nuit et en heures pleines, et ce que rapporterait de décaler les heures pleines, en euros par an. Avec des panneaux, le conseil dit « au soleil d'abord, sinon la nuit ».
+- La puissance souscrite : chaque jour, la plus forte pointe achetée sur 12 mois, face à la puissance juste en dessous. Hestia dit de la garder, ou ce que la puissance plus basse ferait gagner sur l'abonnement.
 - Dans la carte Contrat : « Quand tournent vos machines », et les jours de chaque mois où le soleil en trop suffit pour une machine.
 - Le bandeau « Le chauffe-eau chauffe en partie au réseau » dit ce qu'il y a à gagner par an.
 
