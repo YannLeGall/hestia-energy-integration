@@ -118,6 +118,39 @@ def mend(f: dict, page) -> bool:
     return not (f["id"] == "p_sans_statistiques" and page is not None and hub.owner(f, page) != f.get("stat"))
 
 
+def _double(hass, c, values: dict) -> dict:
+    """« Un compteur compte double »: the last such day in figures, then the meter to look at, and a way to mend it.
+    Opens the page Énergie of Home Assistant, where a device is declared (and « en amont » is said); stays listed on
+    the tab's « Appareils » page (« sur »)."""
+    n = values.get("jours", 0)
+    last = values.get("dernier")
+    when = "Un jour"
+    if isinstance(last, str):
+        try:
+            d = date.fromisoformat(last)
+            when = f"Le {d.day if d.day > 1 else '1er'} {phrases.month_name(d.month)}"
+        except ValueError:
+            pass
+    house, devices = values.get("maison_kwh"), values.get("appareils_kwh")
+    text = when + (f", les appareils mesurés ont compté {phrases.number(devices, 1)} kWh pour une maison à "
+                   f"{phrases.number(house, 1)} kWh" if house is not None and devices is not None else
+                   ", les appareils mesurés ont dépassé la maison entière")
+    text += f" ({n} jours en tout). " if n > 1 else ". "
+    twins = values.get("doublon")
+    heavy = values.get("plus_gros") or []
+    if twins and len(twins) == 2:
+        a, b = (_meter_name(hass, c, s) for s in twins)
+        text += f"{a} et {b} comptent presque pareil : sans doute le même appareil déclaré deux fois. Retirez-en un dans la page Énergie."
+    elif heavy:
+        names = [_meter_name(hass, c, s) for s in heavy]
+        listed = names[0] if len(names) == 1 else ", ".join(names[:-1]) + " ou " + names[-1]
+        text += (f"À regarder d'abord : {listed}. Une prise mesurée derrière une autre se dit dans la page Énergie, "
+                 "avec « Consommation en amont ».")
+    else:
+        text += "Souvent une prise mesurée derrière une autre, ou un appareil déclaré deux fois."
+    return {"titre": "Un compteur compte double", "page": "ha", "sur": "appareils", "texte": text}
+
+
 def todos(hass, c) -> list[dict]:
     """What only the household can mend, each with its probable cause and the page where it is mended."""
     out: list[dict] = []
@@ -138,10 +171,7 @@ def todos(hass, c) -> list[dict]:
                             "page": "sources/poele"})
             continue
         if f["id"] == "p_somme_impossible":
-            n = values.get("jours", 0)
-            out.append({"titre": "Un compteur compte double", "page": "appareils",
-                        "texte": f"{n} jour{'s' if n > 1 else ''}, les appareils ont dépassé la maison entière. Souvent une prise "
-                                 "mesurée derrière une autre, ou un appareil déclaré deux fois."})
+            out.append(_double(hass, c, values))
             continue
         if (f["id"], stat) in seen:
             continue

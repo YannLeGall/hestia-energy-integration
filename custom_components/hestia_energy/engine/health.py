@@ -133,6 +133,23 @@ def impossible(home: dict[date, float], devices: dict[date, float], margin: floa
     return sorted(d for d, kwh in devices.items() if d in home and kwh > home[d] * margin + 0.2)
 
 
+def twins(per_device: dict[str, dict[date, float]], days: list[date], share: float = 0.1, least: float = 0.2) -> tuple[str, str] | None:
+    """Two devices that counted the same energy every one of these days (within 10 %, 0.2 kWh at least each): most
+    likely one appliance declared twice (its plug's own meter and a meter built from its power). The pair that weighs
+    most, or None."""
+    best, weight = None, 0.0
+    stats_ = sorted(per_device)
+    for i, a in enumerate(stats_):
+        for b in stats_[i + 1:]:
+            pairs = [(per_device[a].get(d), per_device[b].get(d)) for d in days]
+            if any(x is None or y is None or min(x, y) < least or abs(x - y) > share * max(x, y) for x, y in pairs):
+                continue
+            w = sum(x + y for x, y in pairs)
+            if w > weight:
+                best, weight = (a, b), w
+    return best
+
+
 # --- Against the bill's own meter (Enedis through HA Linky or MyElectricalData) ----------------------------------
 
 GAP_SHARE = 0.02      # a difference over the year worth saying
