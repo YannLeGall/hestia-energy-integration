@@ -7,7 +7,7 @@ import {hubStyles,modernStyles,pageStyles,listSection,listRow,saveBar,segmented,
    Everything shown comes from the integration (hestia_energy/hub, settings, periods); the tab computes nothing but sums. */
 
 type Hass={callWS:<T>(msg:Record<string,unknown>)=>Promise<T>;states:Record<string,{state:string;attributes:Record<string,unknown>}>;language?:string};
-type Todo={titre:string;texte:string;page:string};
+type Todo={titre:string;texte:string;page:string;sur?:string};
 type Period={debut:string;kwh_achetes:number;euros:number|null;euros_energie:number|null;soleil_couvre:number|null;revendu_euros:number|null;soleil_kwh?:number|null};
 type Source={id:string;groupe:string;nom:string;usage:string;etat:'ok'|'todo';sous?:string|null;chiffres:{texte:string;benefice?:boolean}[];
  origine:{nom:string;role:string;texte:string;entite:string;par?:string|null}[];corrige:string[];enedis?:{titre:string;texte:string}[];suit_enedis?:boolean;gaz_declare?:boolean};
@@ -27,7 +27,7 @@ type Settings={reglages:Record<string,unknown>;trouve:{option:Found<string>;offp
  margin:Found<number>;sac_kg:number|null;notify:{id:string;nom:string}[];a:{revente:boolean;eau:boolean;poele:boolean;delestage:boolean;un_compteur:boolean}}};
 
 const REPO='https://github.com/hestiaFB/hestia-energy-integration';
-const VERSION='1.0.0b1';
+const VERSION='1.0.0b2';
 const HA_ENERGY='/config/energy';
 const MONTHS=['janvier','février','mars','avril','mai','juin','juillet','août','septembre','octobre','novembre','décembre'];
 const DAYS=['dimanche','lundi','mardi','mercredi','jeudi','vendredi','samedi'];
@@ -250,7 +250,7 @@ export class HestiaEnergySetup extends LitElement {
   const top=list.filter(d=>!d.dans);
   const total=(g:string)=>top.filter(d=>this.group(d)===g).reduce((a,d)=>a+(d.euros??0),0);
   const groups=h.groupes.map(([k])=>k).filter(g=>list.some(d=>this.group(d)===g)).sort((a,b)=>total(b)-total(a));
-  const todo=h.a_regler.filter(t=>t.page==='appareils');
+  const todo=h.a_regler.filter(t=>t.page==='appareils'||t.sur==='appareils');
   return html`${this.head('Appareils',{lead:`${list.length} appareil${list.length>1?'s':''} mesuré${list.length>1?'s':''}${h.appareils.part!=null?` · ${h.appareils.part} % de la maison en ${month}`:''}`,
     help:`Le reste, c’est ce qui n’est pas mesuré : éclairage, box, petits appareils. Les euros sont ceux de ${month}, au prix moyen payé ce mois-là, soleil compris.`})}
    ${listSection('',[this.haRow('Ajouter un appareil','Énergie suit les appareils déclarés dans la page Énergie de Home Assistant.')])}

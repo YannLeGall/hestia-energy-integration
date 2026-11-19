@@ -58,6 +58,17 @@ class SumOfMeters(unittest.TestCase):
         self.assertEqual(verdict.set_aside[0][1], "muet")
 
 
+    def test_panels_at_rest_at_night_are_not_silent(self):
+        # Home, 19 Nov. 2026, 23 h: the three solar meters at 0 W, last reported at sunset. Nothing is wrong.
+        later = NOW + timedelta(hours=3)
+        panels = [Reading(f"sensor.panneaux_{n}", "0", "W", NOW, NOW) for n in ("est", "sud", "ouest")]
+        inverter = Reading("sensor.opendtu_ac_power", "0.0", "W", NOW, NOW)
+        verdict = judge("soleil", [Candidate("Page Énergie", [(r, 1) for r in panels]),
+                                   Candidate("OpenDTU", [(inverter, 1)], local=True)], later)
+        self.assertEqual(verdict.value, 0)
+        self.assertNotIn("muet", [why for _, why, _ in verdict.set_aside])
+
+
 class Water(unittest.TestCase):
     def test_a_flow_that_never_stops(self):
         now, _ = live_snapshot()

@@ -254,18 +254,37 @@ def _since(home: Home, start: datetime) -> None:
             home.findings.append(Finding("p_depuis", reading.meter.stat, {"capteur": name, "date": reading.since}))
 
 
+RECENT_DAYS = 30
+MIN_DOUBLE_DAYS = 3
+
+
 def _impossible(home: Home) -> None:
     """Days where the measured devices (sub-meters counted once) used more than the whole home."""
     whole = {d: t.kwh for d, t in home.consumption_days().items() if t.complete}
     devices: dict[date, float] = {}
+    per_device: dict[str, dict[date, float]] = {}
     for reading in home.of("device"):
         if reading.meter.included_in:
             continue
+        mine = per_device.setdefault(reading.meter.stat, {})
         for day, t in stats.days(reading.series, home.tz).items():
             devices[day] = devices.get(day, 0.0) + t.kwh
-    days = health.impossible(whole, devices)
-    if days:
-        home.findings.append(Finding("p_somme_impossible", "", {"jours": len(days), "dernier": days[-1], "liste": days}))
+            mine[day] = mine.get(day, 0.0) + t.kwh
+    # A meter counted twice (one appliance declared twice, a plug behind another one without « en amont ») shows day after
+    # day. A rare day long ago is a meter's jump in its history, which the household cannot mend (Frank's home, 19 Nov.
+    # 2026: 12 May and 23 Aug., a plug's 8 kWh hour and the export meter's jumps): only the last 30 days count, 3 at least.
+    if not whole:
+        return
+    end = max(whole)
+    days = [d for d in health.impossible(whole, devices) if (end - d).days < RECENT_DAYS]
+    if len(days) >= MIN_DOUBLE_DAYS:
+        # What the household needs to find the meter: the last such day in figures, a pair that counted the same energy
+        # (declared twice), else the devices that weighed most those days (a plug measured behind another one).
+        last = days[-1]
+        heavy = sorted(per_device, key=lambda s: -sum(per_device[s].get(d, 0.0) for d in days))[:3]
+        home.findings.append(Finding("p_somme_impossible", "", {
+            "jours": len(days), "dernier": last, "liste": days, "maison_kwh": round(whole[last], 1),
+            "appareils_kwh": round(devices.get(last, 0.0), 1), "doublon": list(health.twins(per_device, days) or []) or None, "plus_gros": heavy}))
 
 
 # --- Following the bill's meter (Enedis fait foi, decided on 7 Nov. 2026) ------------------------------------------

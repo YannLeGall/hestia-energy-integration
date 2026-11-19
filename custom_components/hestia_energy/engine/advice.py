@@ -69,6 +69,7 @@ class Situation:
     water_leak_min: float | None = None
     water_litres_per_day: float | None = None
     watched: dict = field(default_factory=dict)      # device name → its normal duration in hours (« à surveiller »)
+    heater_gain: float | None = None   # € a year the water heater's paid peak hours cost more than the night (habits)
 
     @property
     def machines(self) -> list[Running]:
@@ -143,7 +144,8 @@ def _pick(s: Situation) -> tuple[str, dict]:
             return "machine_heures_pleines", {"machine": _the(machines[0]), "heure_hc": _minute(hc_at, tz)}
     heater = next((r for r in s.running if r.kind == "chauffe_eau" and r.watts >= MACHINE_W), None)
     if heater and s.period == "hp" and (bought or 0) >= 0.5 * heater.watts and (hc_at is not None or s.sun_peak is not None):
-        return "chauffe_eau_reseau", {}
+        gain = s.heater_gain
+        return "chauffe_eau_reseau", {"euros": phrases.euros(gain) if gain is not None and gain >= 5 else None}
     for r in s.running:
         normal = s.watched.get(r.name)
         if normal and r.hours_on is not None and r.hours_on > normal:

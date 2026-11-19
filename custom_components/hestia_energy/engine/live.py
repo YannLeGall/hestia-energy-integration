@@ -4,7 +4,9 @@ Each candidate is judged on what it does, not on its « local » or « cloud » 
 1. unavailable or not a number: set aside;
 2. frozen: unchanged for 30 minutes while another source of the same quantity moved and disagrees (Frank's
    « Total puissance produite instantanée » at 0 W since 23 h 34 while OpenDTU gives 2 083 W);
-3. silent (not reported for 15 minutes, nobody contradicting it): set aside for the live view (« en attente »);
+3. silent (not reported for 15 minutes, nobody contradicting it): set aside for the live view (« en attente »),
+   unless it is at rest (0 W): a meter that gives nothing has nothing to report, and many only report a change
+   (the panels at night, prod 19 Nov. 2026: « Donnée douteuse » on every night);
 4. late: its statistics come an hour after its power (health.lag): kept, behind the others;
 then the freshest wins; within a minute of each other, the local one first (it survives an internet cut-off).
 
@@ -84,7 +86,7 @@ def judge(quantity: str, candidates: list[Candidate], now: datetime) -> Verdict:
     for c in candidates:
         if not c.parts or c.value() is None:
             verdict.set_aside.append((c, "indisponible", {}))
-        elif (now - c.reported()).total_seconds() > SILENT_S:
+        elif (now - c.reported()).total_seconds() > SILENT_S and c.value() != 0:
             silent.append(c)
         else:
             alive.append(c)

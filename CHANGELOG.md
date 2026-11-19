@@ -1,3 +1,21 @@
+## 1.0.0b2 — Votre contrat, bien utilisé
+
+### Nouveautés
+
+- « Votre contrat, bien utilisé », dans la carte complète : sur les 12 derniers mois, la part de vos achats en heures creuses face à la part à partir de laquelle elles rapportent, et si votre option est la bonne (ce qu'aurait coûté la Base). Jamais sur un seul mois : en hiver, la part des heures creuses baisse.
+- Pour le chauffe-eau et les machines (lave-linge, lave-vaisselle, sèche-linge) : ce qu'ils prennent au soleil, la nuit et en heures pleines, et ce que rapporterait de décaler les heures pleines, en euros par an. Avec des panneaux, le conseil dit « au soleil d'abord, sinon la nuit ».
+- La puissance souscrite : chaque jour, la plus forte pointe achetée sur 12 mois, face à la puissance juste en dessous. Hestia dit de la garder, ou ce que la puissance plus basse ferait gagner sur l'abonnement.
+- Dans la carte Contrat : « Quand tournent vos machines », et les jours de chaque mois où le soleil en trop suffit pour une machine.
+- Le bandeau « Le chauffe-eau chauffe en partie au réseau » dit ce qu'il y a à gagner par an.
+
+### Corrections
+
+- « Un compteur compte double » ne parle plus d'un jour ancien : un saut de compteur passé dans l'historique ne se corrige pas. Le message n'apparaît que si les appareils dépassent la maison au moins 3 jours sur les 30 derniers.
+- Quand il apparaît, il dit le dernier jour en chiffres et le compteur à regarder (deux appareils qui comptent pareil, ou les plus gros ce jour-là), et il ouvre la page Énergie de Home Assistant, où cela se corrige. Avant, il renvoyait vers la page où on était déjà.
+- La nuit, les panneaux à 0 W qui se taisent ne sont plus pris pour un capteur en panne : « Donnée douteuse » ne s'allume plus chaque nuit.
+- La carte ne dit plus « Un capteur ne répond plus » pour un point déjà réglé (le poêle déclaré en granulés) ou qu'on ne peut pas régler. Elle renvoie vers « À régler » seulement quand il y a vraiment quelque chose à faire.
+- Quand la revente dépasse la production (une partie de la production n'a pas été mesurée), la part du soleil n'est plus affichée à 0 % : la carte dit que la production manque.
+
 ## 1.0.0b1 — Le conseiller énergie de la maison
 
 ### Nouveautés
