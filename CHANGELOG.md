@@ -4,6 +4,9 @@
 
 - « Un compteur compte double » ne parle plus d'un jour ancien : un saut de compteur passé dans l'historique ne se corrige pas. Le message n'apparaît que si les appareils dépassent la maison au moins 3 jours sur les 30 derniers.
 - Quand il apparaît, il dit le dernier jour en chiffres et le compteur à regarder (deux appareils qui comptent pareil, ou les plus gros ce jour-là), et il ouvre la page Énergie de Home Assistant, où cela se corrige. Avant, il renvoyait vers la page où on était déjà.
+- La nuit, les panneaux à 0 W qui se taisent ne sont plus pris pour un capteur en panne : « Donnée douteuse » ne s'allume plus chaque nuit.
+- La carte ne dit plus « Un capteur ne répond plus » pour un point déjà réglé (le poêle déclaré en granulés) ou qu'on ne peut pas régler. Elle renvoie vers « À régler » seulement quand il y a vraiment quelque chose à faire.
+- Quand la revente dépasse la production (une partie de la production n'a pas été mesurée), la part du soleil n'est plus affichée à 0 % : la carte dit que la production manque.
 
 ## 1.0.0b1 — Le conseiller énergie de la maison
 
