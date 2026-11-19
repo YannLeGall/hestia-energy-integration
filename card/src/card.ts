@@ -400,7 +400,7 @@ class HestiaEnergyCard extends LitElement {
   const out:TemplateResult[]=[];
   const j=v.jour;
   if(v.equipement.soleil&&j?.soleil_kwh!=null)out.push(this._go('soleil','sun','--nw-sun','Soleil · aujourd\'hui',kwh(j.soleil_kwh),'kWh produits',
-   j.soleil_garde!=null?`La maison en a gardé ${j.soleil_garde} %.`:'Rien encore aujourd\'hui.'));
+   j.soleil_garde!=null?`La maison en a gardé ${j.soleil_garde} %.`:j.soleil_kwh>0?'Une partie de la production n\'a pas été mesurée.':'Rien encore aujourd\'hui.'));
   const heat=this._heatSum(v);
   if(heat)out.push(this._go('chauffage','flame','--nw-heat','Chauffage · depuis le 1er octobre',heat.val,heat.unit,heat.say));
   if(v.veille)out.push(this._go('veille','moon','--nw-watch','Veille · chaque nuit',String(v.veille.w),'W quand tout dort',

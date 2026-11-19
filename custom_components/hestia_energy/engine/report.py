@@ -40,16 +40,22 @@ class Period:
         return self.bought_kwh + self.sun_kwh - (self.sent_kwh or 0.0)
 
     @property
+    def sun_short(self) -> bool:
+        """More sent than produced: impossible, so some production went unmeasured (prod, 19 Nov. 2026: 5.5 kWh sent
+        for 4.4 kWh of sun, and the card said « le soleil a couvert 0 % »). The sun's shares are then not known."""
+        return self.sun_kwh is not None and (self.sent_kwh or 0.0) > self.sun_kwh * 1.02 + 0.1
+
+    @property
     def sun_cover(self) -> float | None:
         """The share of the home's use the sun covered."""
-        if self.sun_kwh is None or self.used_kwh <= 0:
+        if self.sun_kwh is None or self.sun_short or self.used_kwh <= 0:
             return None
         return max(0.0, min(1.0, (self.sun_kwh - (self.sent_kwh or 0.0)) / self.used_kwh))
 
     @property
     def sun_kept(self) -> float | None:
         """The share of the sun the home used itself."""
-        if not self.sun_kwh:
+        if not self.sun_kwh or self.sun_short:
             return None
         return max(0.0, min(1.0, (self.sun_kwh - (self.sent_kwh or 0.0)) / self.sun_kwh))
 
