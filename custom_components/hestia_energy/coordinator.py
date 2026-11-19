@@ -23,7 +23,7 @@ from homeassistant.util import dt as dt_util
 
 from . import hub_view, reader
 from .const import DOMAIN
-from .engine import advice, anomaly, baseline, cards, daily, health, heating, hub, solar, home as engine_home, live, phrases, report, sources, stats, tariff
+from .engine import advice, anomaly, baseline, cards, daily, habits, health, heating, hub, solar, home as engine_home, live, phrases, report, sources, stats, tariff
 from .engine.rows import Rows, merge as merge_rows
 
 _LOGGER = logging.getLogger(__name__)
@@ -573,6 +573,10 @@ class EnergyCoordinator:
         hours_today = _hours(home, local.date())
         nights = _baseloads(home, local.date())
         findings = [_finding(f, now) for f in [*home.findings, *self._against_reference(self.home_raw or home)]]
+        # « Ton contrat, bien utilisé »: a year hour by hour, made once a day (and again when the home is read anew).
+        key = (local.date(), id(home), self.contract.option, self.offpeak)
+        if getattr(self, "_usage_key", None) != key:
+            self._usage, self._usage_key = habits.usage(home, self.contract, self.table, now, self.device_names), key
         # What « À régler » lists: the card's « Un capteur… » line and the binary sensor say the same, no more.
         to_mend = hub_view.pending(self, findings)
         # What a kWh of sun kept saves: the daytime price (peak hours, or Base).
@@ -602,6 +606,7 @@ class EnergyCoordinator:
                         # what is only supposed, not read (one Linky meter): the cards ask to confirm it in Réglages
                         "a_confirmer": hub_view.contract_supposed(self),
                         **cards.contract_month(home, self.contract, self.table, now, month)},
+            "usage": self._usage,
             "constats": findings,
             "a_regler": [{"quoi": f["id"], "stat": f.get("stat")} for f in to_mend],
             "heures": {"aujourdhui": hours_today, "hier": _hours(home, local.date() - timedelta(days=1))},
@@ -836,7 +841,7 @@ class EnergyCoordinator:
             export_price=self.contract.export_price if self.contract else None,
             offpeak_price=self._price_of("hc", now) if self.contract and self.contract.option == tariff.HPHC else None,
             water_leak_min=self.flow.minutes(now), water_litres_per_day=self.flow.litres_per_day if self.flow.since else None,
-            watched=watched)
+            watched=watched, heater_gain=habits.heater_gain(self.data.get("usage")))
         banner = self.steady.update(advice.choose(situation), now)
         self._alert(banner)
         price = None

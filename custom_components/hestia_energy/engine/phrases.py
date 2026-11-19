@@ -25,7 +25,7 @@ BANNER = {
     "machine_heures_pleines": (GESTE, "Heures pleines pour {machine}.",
                                "La prochaine fois, attendez les heures creuses ({heure_hc})."),
     "chauffe_eau_reseau": (GESTE, "Le chauffe-eau chauffe en partie au réseau.",
-                           "La prochaine fois : soleil d'abord, le reste en heures creuses."),
+                           "Soleil d'abord, sinon les heures creuses[ : {euros} € par an à gagner]."),
     "oublie": (GESTE, "{appareil} est allumé depuis {duree}.", "Oublié ?"),
     "poele_moins_cher": (GESTE, "Le poêle chaufferait {facteur} fois moins cher que les radiateurs.",
                          "[Ce soir,] allumez-le plutôt."),

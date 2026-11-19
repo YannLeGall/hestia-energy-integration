@@ -18,7 +18,7 @@ VIEW_VERSION = 1
 # out of their view (33 kB → about 10 kB; audit of 9 Nov. 2026).
 CARD_KEYS = ("pret", "palier", "equipement", "direct", "jour", "hier", "mois", "mois_an_dernier", "projection", "jusqu_ici",
              "dernier_jour", "pistes", "veille", "veille_historique", "heures_creuses", "contrat", "heures", "eau",
-             "chauffage", "panneaux", "soleil_jour", "appareils_jour", "pointe")
+             "chauffage", "panneaux", "soleil_jour", "appareils_jour", "pointe", "usage")
 
 
 def _coordinator(hass):
