@@ -118,7 +118,7 @@ Une seule carte, **Hestia Énergie**, en plusieurs formats. Chacun répond à un
 
 | Format | Ce qu’il montre |
 | --- | --- |
-| **Complète** (par défaut) | En ce moment, aujourd’hui, ce mois-ci, puis « En détail » : un appui sur un encart ouvre sa carte de détail. Jusqu’à 3 conseils « Pour économiser ». |
+| **Complète** (par défaut) | En haut, l’horloge de la journée : un trait par heure, ce qui est acheté (heures pleines et creuses) et le soleil, avec le prix du moment. Puis en ce moment, aujourd’hui, ce mois-ci, puis « En détail » : un appui sur un encart ouvre sa carte de détail. Jusqu’à 3 conseils « Pour économiser ». |
 | **Tuile** | En ce moment : une phrase, un chiffre. « La maison consomme 1,3 kW. » Quand il n’y a rien à faire, le meilleur conseil. |
 | **Conseils** | Ce qui ferait économiser, en euros par an, du plus rentable au moins rentable. |
 | **Soleil** | Ce que les panneaux ont produit aujourd’hui, groupe par groupe. |

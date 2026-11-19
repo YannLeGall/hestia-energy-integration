@@ -1,4 +1,4 @@
-import {LitElement,html,nothing,unsafeCSS,type TemplateResult} from 'lit';
+import {LitElement,html,svg,nothing,unsafeCSS,type TemplateResult} from 'lit';
 import {unsafeHTML} from 'lit/directives/unsafe-html.js';
 import charte from './ui/hestia-charte.css';
 import energy from './energy.css';
@@ -7,7 +7,8 @@ import {follow,type Connection} from './stream';
 
 /* Hestia Énergie's card, after the cards' mock-up 2 (docs/maquette-cartes-2.html, validated by Frank on 8 Nov. 2026):
    1 · the tile: « Énergie · en ce moment », one sentence, one figure (card: tuile)
-   2 · the full card: the banner, then one period per section (En ce moment · Aujourd'hui · Ce mois-ci), then « En détail »
+   2 · the full card: the 24-hour clock with the banner (maquette « Bandeaux de la carte complète », B, chosen by Frank on
+       19 Nov. 2026), then one period per section (En ce moment · Aujourd'hui · Ce mois-ci), then « En détail »
        (card: complete, by default)
    3 · the detail cards, over the page from « En détail » or alone (card: soleil | chauffage | veille | eau | appareils |
        pointe | contrat): the answer header (SUBJECT · period / the answer with its figure in bold / why), one period
@@ -224,15 +225,74 @@ class HestiaEnergyCard extends LitElement {
  private _full(v:View){
   const b=v.direct?.bandeau,now=new Date();
   const when=now.toLocaleDateString('fr-FR',{weekday:'long',day:'numeric',month:'long'})+' · '+clock(now);
-  const secs=[this._nowSection(v),this._todaySection(v),this._monthSection(v)].filter(s=>s!==nothing);
+  const dial=this._clock(v);
+  // Without live power, « En ce moment » only says the price: the clock already does.
+  const secs=[dial&&!this._live(v)?nothing:this._nowSection(v),this._todaySection(v),this._monthSection(v)].filter(s=>s!==nothing);
   return html`<ha-card>
    <div class="head"><div style="min-width:0"><div class="nw-label">Énergie</div><div class="nw-title">${this._name()}</div></div><div class="when">${when}</div></div>
-   ${b&&this._live(v)?html`<div class="nw-band nw-glass" data-level=${LEVEL[b.couleur]??'ok'}><div class="nw-band-row"><span class="nw-band-pic box">${icon(BANNER_ICON[b.id]??'home')}</span>
-    <div class="nw-band-text"><p class="nw-band-kicker">En ce moment</p><p class="nw-band-title">${b.titre}</p>${b.pourquoi||this._periodSay(v)?html`<p class="nw-band-line">${b.pourquoi||this._periodSay(v)}</p>`:nothing}</div></div></div>`:nothing}
+   ${dial??(b&&this._live(v)?html`<div class="nw-band nw-glass" data-level=${LEVEL[b.couleur]??'ok'}><div class="nw-band-row"><span class="nw-band-pic box">${icon(BANNER_ICON[b.id]??'home')}</span>
+    <div class="nw-band-text"><p class="nw-band-kicker">En ce moment</p><p class="nw-band-title">${b.titre}</p>${b.pourquoi||this._periodSay(v)?html`<p class="nw-band-line">${b.pourquoi||this._periodSay(v)}</p>`:nothing}</div></div></div>`:nothing)}
    <div class="periods${secs.length===2?' two':''}">${secs}</div>
    ${v.pistes?.length?this._section('save','Pour économiser','à froid, en euros',html`<div class="pistes">${v.pistes.slice(0,3).map(p=>this._piste(p))}</div>`):nothing}
    ${this._section('more','En détail','touchez pour ouvrir',html`<div class="more">${this._goes(v)}</div>`)}
   </ha-card>`;
+ }
+ /** The 24-hour clock: one stroke an hour, out from the ring for what was bought (peak hours warm, off-peak hours cold),
+     in towards the centre for the sun, yesterday's hours still to come in grey, a hand on the time. Beside it, the banner
+     (or what the day says) and the figures of the moment. Without any hour of today (a Linky read the day after), the
+     clock shows yesterday, whole. Nothing to draw: undefined, and the plain banner stays. */
+ private _clock(v:View):TemplateResult|undefined{
+  const today=v.heures?.aujourdhui??[],yday=v.heures?.hier??[],known=today.some(h=>h.achat!=null);
+  const hours=known?today:yday;
+  if(!hours.some(h=>h.achat!=null))return undefined;
+  const now=new Date(),at=now.getHours()+now.getMinutes()/60,ranges=offpeak(v.heures_creuses);
+  const hc=(i:number)=>ranges.some(([a,b])=>i*60+30>=a&&i*60+30<b);
+  const top=Math.max(.3,...hours.map(h=>h.achat??0),...(known?yday.map(h=>h.achat??0):[]));
+  const sunTop=Math.max(.3,...hours.map(h=>h.soleil??0));
+  const C=170,R=98,L=46,S=86,SL=32;
+  const at24=(h:number)=>h/24*Math.PI*2-Math.PI/2;
+  const xy=(h:number,r:number)=>`${(C+Math.cos(at24(h))*r).toFixed(1)} ${(C+Math.sin(at24(h))*r).toFixed(1)}`;
+  const seg=(i:number,r1:number,r2:number)=>`M${xy(i+.5,r1)} L${xy(i+.5,r2)} `;
+  let peak='',off='',sun='',next='',bought=0;
+  for(let i=0;i<24;i++){
+   const h=hours[i];
+   if(known&&i>now.getHours()){const y=yday[i]?.achat;if(y!=null)next+=seg(i,R,R+3+y/top*L);continue;}
+   if(h?.achat!=null){bought+=h.achat;const d=seg(i,R,R+3+h.achat/top*L);if(hc(i))off+=d;else peak+=d;}
+   if((h?.soleil??0)>=.01)sun+=seg(i,S,S-3-h.soleil!/sunTop*SL);
+  }
+  const live=this._live(v),d=v.direct,b=d?.bandeau,s=v.jusqu_ici,y=v.dernier_jour;
+  const centre=live?[`${kw(d!.maison_w)} kW`,'en ce moment']:known&&s?.euros!=null?[`${eur(s.euros)} €`,'depuis minuit']
+   :!known&&y?.euros!=null?[`${eur(y.euros)} €`,dayName(y.jour)]:[`${kwh(bought)} kWh`,known?'depuis minuit':dayName(y?.jour)];
+  const sunKwh=known?v.jour?.soleil_kwh:y?.soleil_kwh;
+  const priceOk=d?.prix!=null&&!(v.contrat?.a_confirmer??[]).includes('option');
+  const next_=d?.prochain_changement?` jusqu'à ${clock(new Date(d.prochain_changement.a))}`:'';
+  const stats=[
+   ...(priceOk?[['Le kWh maintenant',`${price(d!.prix)} €`,`${this._when(d)}${next_}`.trim()||'à toute heure','--nw-home']]:[]),
+   ...(known&&v.pointe?[['Heure la plus chargée',`${kw(v.pointe.kw*1000)} kW`,`entre ${hour(v.pointe.h)} et ${hour(v.pointe.h+1)}`,'--nw-grid']]:[]),
+   ...(v.equipement.soleil&&sunKwh!=null&&sunKwh>=.05?[['Soleil',`${kwh(sunKwh)} kWh`,known?'produits aujourd\'hui':`produits ${dayName(y?.jour)}`,'--nw-sun']]:[]),
+  ];
+  const title=live&&b?b.titre:`${known?'Aujourd\'hui':cap(dayName(y?.jour))}, en un tour d'horloge`;
+  const line=live&&b?(b.pourquoi||this._periodSay(v)):known?'':'Le compteur envoie chaque journée le lendemain.';
+  const label=`${known?'Aujourd\'hui':cap(dayName(y?.jour))} heure par heure : ${kwh(bought)} kWh achetés au réseau${sunKwh!=null&&sunKwh>=.05?`, ${kwh(sunKwh)} kWh de soleil`:''}.`;
+  const tick=(h:number,t:string,anchor:string,dy=4)=>{const [x,yy]=xy(h,R+L+16).split(' ');return svg`<text x=${x} y=${Number(yy)+dy} text-anchor=${anchor}>${t}</text>`;};
+  return html`<div class="clock" data-level=${live&&b?LEVEL[b.couleur]??'ok':'ok'}>
+   <svg class="dial" viewBox="0 0 340 340" role="img" aria-label=${label}>
+    <circle class="ring" cx="170" cy="170" r=${R}></circle>
+    <g class="bars"><path class="next" d=${next}></path><path class="off" d=${off}></path><path class="peak" d=${peak}></path><path class="sun" d=${sun}></path></g>
+    ${tick(0,'0 h','middle',0)}${tick(6,'6 h','end')}${tick(12,'12 h','middle',7)}${tick(18,'18 h','start')}
+    ${known?svg`<path class="hand" d=${`M${xy(at,R-6)} L${xy(at,R+L+6)}`}></path>
+     <circle class="ping" cx=${xy(at,R+L+6).split(' ')[0]} cy=${xy(at,R+L+6).split(' ')[1]} r="4.5"></circle>
+     <circle class="tip" cx=${xy(at,R+L+6).split(' ')[0]} cy=${xy(at,R+L+6).split(' ')[1]} r="4.5"></circle>`:nothing}
+    <text class="cv" x="170" y="172">${centre[0]}</text><text class="cl" x="170" y="194">${centre[1]}</text>
+   </svg>
+   <div class="ct">
+    ${live&&b?html`<p class="nw-label">En ce moment</p>`:nothing}
+    <p class="ctt">${title}</p>${line?html`<p class="ans-w">${line}</p>`:nothing}
+    ${stats.length?html`<div class="cstats">${stats.map(([k,val,sub,c])=>html`<div class="cstat" style="--c:var(${c})"><span>${k}</span><b>${val}</b><small>${sub}</small></div>`)}</div>`:nothing}
+    <div class="nw-legend"><span><i style="--c:var(--nw-home)"></i>acheté en heures pleines</span>${ranges.length?html`<span><i style="--c:var(--nw-cold)"></i>en heures creuses</span>`:nothing}
+     ${sun?html`<span><i style="--c:var(--nw-sun)"></i>soleil, vers le centre</span>`:nothing}${next?html`<span><i style="--c:color-mix(in srgb, var(--nw-fg) 18%, transparent)"></i>hier, aux heures à venir</span>`:nothing}</div>
+   </div>
+  </div>`;
  }
  /** « Heures pleines jusqu'à 0 h 14, puis heures creuses jusqu'à 8 h 19. »: under a banner that says nothing more. */
  private _periodSay(v:View){
