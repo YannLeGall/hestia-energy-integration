@@ -89,5 +89,26 @@ class Sentence(unittest.TestCase):
         self.assertIn("ont dépassé la maison entière (2 jours en tout)", todo["texte"])
 
 
+@unittest.skipIf(hub_view is None, "Home Assistant absent")
+class StillToMend(unittest.TestCase):
+    """Prod, 19 Nov. 2026: the stove answered « granulés » and the aquarium's power without statistics kept the card
+    saying « Un capteur ne répond plus » and « Donnée douteuse » on, while « À régler » listed neither."""
+
+    def setUp(self):
+        meter = SimpleNamespace(stat="sensor.aquarium_kwh", power=SimpleNamespace(entities=["sensor.aquarium_w"]))
+        self.page = SimpleNamespace(meters=[meter])
+        self.findings = [{"id": "p_fausse_source", "niveau": "regler", "stat": "sensor.poele"},
+                         {"id": "p_sans_statistiques", "niveau": "regler", "stat": "sensor.aquarium_w"},
+                         {"id": "p_saut", "niveau": "info", "stat": "sensor.frigo"}]
+
+    def test_nothing_left_once_the_stove_is_answered(self):
+        c = SimpleNamespace(page=self.page, settings={"stove_fuel": "pellets"})
+        self.assertEqual(hub_view.pending(c, self.findings), [])
+
+    def test_the_stove_until_answered(self):
+        c = SimpleNamespace(page=self.page, settings={"stove_fuel": None})
+        self.assertEqual([f["id"] for f in hub_view.pending(c, self.findings)], ["p_fausse_source"])
+
+
 if __name__ == "__main__":
     unittest.main()

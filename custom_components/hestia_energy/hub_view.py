@@ -118,6 +118,14 @@ def mend(f: dict, page) -> bool:
     return not (f["id"] == "p_sans_statistiques" and page is not None and hub.owner(f, page) != f.get("stat"))
 
 
+def pending(c, findings: list[dict]) -> list[dict]:
+    """The findings the household still has to mend, as « À régler » lists them: not a live power without statistics
+    (see mend), not the stove declared in gas once the household said what it burns (prod, 19 Nov. 2026: both kept
+    « Un capteur ne répond plus » on the card and « Donnée douteuse » on for good)."""
+    answered = c.settings.get("stove_fuel") is not None
+    return [f for f in findings if mend(f, c.page) and not (f["id"] == "p_fausse_source" and answered)]
+
+
 def _double(hass, c, values: dict) -> dict:
     """« Un compteur compte double »: the last such day in figures, then the meter to look at, and a way to mend it.
     Opens the page Énergie of Home Assistant, where a device is declared (and « en amont » is said); stays listed on

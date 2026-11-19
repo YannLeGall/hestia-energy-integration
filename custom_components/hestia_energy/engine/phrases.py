@@ -90,7 +90,7 @@ KNOW = {
     "hc_dans": "Heures creuses dans {minutes} min.",
     "revente_vaut_peu": "Un kWh gardé vaut {facteur} fois un kWh revendu.",
     "veille_hausse": "La nuit, {logement} consomme plus qu'en {mois} : environ {euros} € de plus par an.",
-    "capteur_douteux": "Un capteur ne répond plus ou ne bouge plus : voir l'onglet Énergie.",
+    "capteur_douteux": "Un compteur est à régler : voir « À régler » dans l'onglet Énergie.",
     "budget": "Au rythme actuel, le mois finira à {euros} €.",
     "soleil_garde": "Hier, la maison a gardé {pourcent} % de son soleil.",
     "soleil_evite": "Ce mois, le soleil a évité {euros} € d'achats.",
