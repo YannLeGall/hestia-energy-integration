@@ -61,7 +61,12 @@ class Candidate:
         return max(r.changed for r, _ in self.parts)
 
     def reported(self) -> datetime:
-        return min(r.reported for r, _ in self.parts)
+        """When the source last spoke: its stalest part, leaving out the parts at 0 W. A meter at rest that stops
+        reporting has nothing to say (the off-peak meter during peak hours, the panels at night): it must not silence
+        the part that measures (labo, 19 Nov. 2026: « Page Énergie » set aside 15 min after a restart, its peak-hours
+        meter alive every 15 s). All parts at rest: the freshest of them."""
+        busy = [r.reported for r, _ in self.parts if r.watts != 0]
+        return min(busy) if busy else max(r.reported for r, _ in self.parts)
 
 
 @dataclass
