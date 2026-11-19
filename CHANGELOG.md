@@ -14,6 +14,7 @@
 - Le soleil : la part couverte par les panneaux, la revente, et un panneau qui produit moins que d’habitude.
 - Le chauffage de la saison : radiateurs, et poêle à granulés avec Suivi Stock Pellet.
 - La carte Hestia Énergie : complète, tuile, conseils, et sept cartes de détail (soleil, chauffage, veille, eau, appareils, pointe, contrat). Chacune répond en une phrase, sur une seule période.
+- La carte complète s’ouvre sur l’horloge de la journée : un trait par heure, ce que la maison a acheté (heures pleines et creuses) et ce que le soleil a donné, une aiguille sur l’heure, et à côté le prix du moment, l’heure la plus chargée et le soleil du jour. Avec un Linky lu le lendemain, elle montre la veille.
 - L’onglet Énergie du panneau Hestia-FB : vue d’ensemble, sources, appareils, réglages, extensions, bilan, à propos.
 - Les bilans d’hier, de la semaine et du mois, et les alertes, en notification si vous le voulez (aucune par défaut).
 - Des entités pour vos automatisations : coût du jour et du mois, prix du moment, heures creuses, veille de nuit, soleil en trop, pointe proche, conseil et sa couleur.

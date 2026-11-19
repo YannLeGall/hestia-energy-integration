@@ -171,3 +171,52 @@ button.piste:focus-visible { outline:2px solid var(--nw-accent); outline-offset:
 .piste.up { background:none; border:1px dashed var(--nw-line); }
 .piste.up .pt { font-weight:600; }
 .piste.up .ico { background:color-mix(in srgb, var(--nw-fg) 6%, transparent); color:var(--nw-fg2); }
+
+/* L'horloge de 24 heures, en haut de la carte complète (maquette « Bandeaux de la carte complète », B, choisie par Frank le
+   19 nov. 2026) : un trait par heure, vers l'extérieur ce qui est acheté (heures pleines chaudes, heures creuses froides),
+   vers le centre le soleil, en gris les heures à venir d'hier, une aiguille sur l'heure. À côté, le conseil et les chiffres
+   du moment. Étroite : l'horloge au-dessus, centrée. */
+.clock { --c:var(--nw-ok); display:flex; flex-direction:column; align-items:center; gap:14px; min-width:0; }
+.clock[data-level="benefit"] { --c:var(--nw-benefit); } .clock[data-level="action"] { --c:var(--nw-act); } .clock[data-level="urgent"] { --c:var(--nw-alert); }
+.dial { display:block; width:100%; max-width:300px; height:auto; flex:none; overflow:visible; }
+.dial .ring { fill:none; stroke:var(--nw-line-soft); stroke-width:1; }
+.dial .bars path { fill:none; stroke-width:8; stroke-linecap:round; }
+.dial .peak { stroke:var(--nw-home); } .dial .off { stroke:var(--nw-cold); } .dial .sun { stroke:var(--nw-sun); }
+.dial .next { stroke:color-mix(in srgb, var(--nw-fg) 13%, transparent); }
+.dial .hand { fill:none; stroke:var(--nw-fg); stroke-width:2; stroke-linecap:round; }
+.dial .tip, .dial .ping { fill:var(--nw-fg); }
+.dial text { fill:var(--nw-fg2); font-size:11px; font-weight:600; }
+.dial .cv { fill:var(--nw-fg); font-size:30px; font-weight:300; letter-spacing:-.03em; text-anchor:middle; font-variant-numeric:tabular-nums; }
+.dial .cl { font-size:12px; text-anchor:middle; }
+.dial .bars { transform-box:view-box; transform-origin:50% 50%; animation:nw-dial-in 1.2s cubic-bezier(.2,.8,.2,1) both; }
+.dial .ping { transform-box:fill-box; transform-origin:center; animation:nw-ping 2.4s ease-out infinite; }
+@keyframes nw-dial-in { from { transform:rotate(-35deg); opacity:0; } to { transform:none; opacity:1; } }
+@keyframes nw-ping { from { transform:scale(1); opacity:.6; } to { transform:scale(3); opacity:0; } }
+@media (prefers-reduced-motion:reduce) { .dial .bars, .dial .ping { animation:none; } .dial .ping { display:none; } }
+.clock .ct { display:flex; flex-direction:column; gap:10px; min-width:0; width:100%; }
+.clock .ct p { margin:0; }
+.clock .ctt { font-size:var(--nw-fs-case); font-weight:700; letter-spacing:-.015em; line-height:1.25; text-wrap:balance; }
+.clock[data-level="action"] .ctt, .clock[data-level="urgent"] .ctt { color:color-mix(in oklab, var(--c) 70%, var(--nw-fg)); }
+.cstats { display:grid; grid-template-columns:repeat(auto-fit, minmax(150px, 1fr)); gap:10px; margin-top:4px; }
+.cstat { display:flex; flex-direction:column; gap:2px; padding:12px 14px; border-radius:var(--nw-radius); background:var(--nw-surface); min-width:0; }
+.cstat span { font-size:var(--nw-fs-small); color:var(--nw-fg2); font-weight:600; }
+.cstat b { font-size:var(--nw-fs-value); font-weight:300; letter-spacing:-.04em; line-height:1.1; white-space:nowrap; font-variant-numeric:tabular-nums;
+  color:color-mix(in oklab, var(--c) 55%, var(--nw-fg)); }
+.cstat small { font-size:var(--nw-fs-small); color:var(--nw-fg2); }
+.clock .nw-legend { justify-content:flex-start; }
+@container (min-width:680px) {
+ .clock { flex-direction:row; gap:28px; }
+ .dial { width:300px; }
+}
+/* La loupe : l'heure survolée, touchée ou atteinte au clavier grandit avec ses voisines, les autres s'effacent ; ses
+   chiffres prennent le centre. Un appui la fige, un second la relâche. */
+.dial .h path { transition:stroke-width .22s ease, opacity .22s ease, d .22s ease; }
+.dial .h.on path { stroke-width:14; } .dial .h.near path { stroke-width:10; }
+.dial .bars.picking .h.far path { opacity:.28; }
+.dial .h.on .peak { stroke:color-mix(in oklab, var(--nw-home) 80%, var(--nw-fg)); } .dial .h.on .off { stroke:color-mix(in oklab, var(--nw-cold) 80%, var(--nw-fg)); }
+.dial .h.on .next { stroke:color-mix(in srgb, var(--nw-fg) 30%, transparent); }
+.dial .hit { fill:none; stroke:transparent; stroke-width:30; pointer-events:stroke; cursor:pointer; outline:none; -webkit-tap-highlight-color:transparent; }
+.dial .cv.pk { font-size:28px; }
+.dial .cs { fill:var(--nw-fg); font-weight:650; }
+.clock .nw-legend .hint { color:color-mix(in srgb, var(--nw-fg2) 80%, transparent); font-style:italic; }
+@media (prefers-reduced-motion:reduce) { .dial .h path { transition:none; } }
