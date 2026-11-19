@@ -208,3 +208,15 @@ button.piste:focus-visible { outline:2px solid var(--nw-accent); outline-offset:
  .clock { flex-direction:row; gap:28px; }
  .dial { width:300px; }
 }
+/* La loupe : l'heure survolée, touchée ou atteinte au clavier grandit avec ses voisines, les autres s'effacent ; ses
+   chiffres prennent le centre. Un appui la fige, un second la relâche. */
+.dial .h path { transition:stroke-width .22s ease, opacity .22s ease, d .22s ease; }
+.dial .h.on path { stroke-width:14; } .dial .h.near path { stroke-width:10; }
+.dial .bars.picking .h.far path { opacity:.28; }
+.dial .h.on .peak { stroke:color-mix(in oklab, var(--nw-home) 80%, var(--nw-fg)); } .dial .h.on .off { stroke:color-mix(in oklab, var(--nw-cold) 80%, var(--nw-fg)); }
+.dial .h.on .next { stroke:color-mix(in srgb, var(--nw-fg) 30%, transparent); }
+.dial .hit { fill:none; stroke:transparent; stroke-width:30; pointer-events:stroke; cursor:pointer; outline:none; -webkit-tap-highlight-color:transparent; }
+.dial .cv.pk { font-size:28px; }
+.dial .cs { fill:var(--nw-fg); font-weight:650; }
+.clock .nw-legend .hint { color:color-mix(in srgb, var(--nw-fg2) 80%, transparent); font-style:italic; }
+@media (prefers-reduced-motion:reduce) { .dial .h path { transition:none; } }

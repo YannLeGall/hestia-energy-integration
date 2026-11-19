@@ -143,8 +143,10 @@ const H_TICKS=html`<div class="ticks"><span>0 h</span><span>6 h</span><span>12 h
 
 class HestiaEnergyCard extends LitElement {
  static styles=[unsafeCSS(charte),unsafeCSS(energy)];
- static properties={_view:{state:true},_open:{state:true},_folded:{state:true},_error:{state:true}};
+ static properties={_view:{state:true},_open:{state:true},_folded:{state:true},_error:{state:true},_hover:{state:true},_pin:{state:true}};
  declare _view?:View;declare _open?:Rubric;declare _folded:Set<string>;declare _error?:string;
+ /** The clock's hour under the pointer or the focus, and the one pinned by a click or a tap (the magnifier). */
+ declare _hover?:number;declare _pin?:number;
  private _hass?:Hass;private _config:Config={type:'custom:hestia-energy-card',card:'complete'};private _stop?:()=>void;private _again?:number;
  constructor(){super();this._folded=new Set();}
 
@@ -253,16 +255,38 @@ class HestiaEnergyCard extends LitElement {
   const at24=(h:number)=>h/24*Math.PI*2-Math.PI/2;
   const xy=(h:number,r:number)=>`${(C+Math.cos(at24(h))*r).toFixed(1)} ${(C+Math.sin(at24(h))*r).toFixed(1)}`;
   const seg=(i:number,r1:number,r2:number)=>`M${xy(i+.5,r1)} L${xy(i+.5,r2)} `;
-  let peak='',off='',sun='',next='',bought=0;
+  // One spoke an hour, each its own element: the pointer, a tap or the keyboard picks one, and the magnifier grows it and
+  // its neighbours and says its figures in the centre.
+  const c=v.contrat,hp=c?.prix_hp??null,hcPrice=c?.prix_hc??null,base=c?.prix_base??null;
+  const priceAt=(i:number)=>c?.option==='base'?base:c?.option==='hphc'?(hc(i)?hcPrice:hp):null;
+  type Spoke={i:number;cls:string;val:number|null;sun:number|null;future:boolean};
+  const spokes:Spoke[]=[];let bought=0,anySun=false,anyNext=false;
   for(let i=0;i<24;i++){
-   const h=hours[i];
-   if(known&&i>now.getHours()){const y=yday[i]?.achat;if(y!=null)next+=seg(i,R,R+3+y/top*L);continue;}
-   if(h?.achat!=null){bought+=h.achat;const d=seg(i,R,R+3+h.achat/top*L);if(hc(i))off+=d;else peak+=d;}
-   if((h?.soleil??0)>=.01)sun+=seg(i,S,S-3-h.soleil!/sunTop*SL);
+   const h=hours[i],future=known&&i>now.getHours();
+   const val=future?yday[i]?.achat??null:h?.achat??null,sunV=future?null:(h?.soleil??0)>=.01?h!.soleil:null;
+   if(!future&&val!=null)bought+=val;
+   if(sunV!=null)anySun=true;if(future&&val!=null)anyNext=true;
+   spokes.push({i,cls:future?'next':hc(i)?'off':'peak',val,sun:sunV,future});
   }
+  // A spoke's kWh to the hundredth under 1 kWh: an hour is small (« 0,95 kWh », not « 1 kWh »).
+  const kwhH=(x:number)=>x<1?num(x,2):kwh(x);
+  const pick=this._pin??this._hover,dist=(a:number,b:number)=>{const k=Math.abs(a-b);return Math.min(k,24-k);};
+  const grow=(i:number)=>pick==null?0:dist(i,pick)===0?16:dist(i,pick)===1?5:0;
+  const say=(sp:Spoke)=>{const e=sp.val!=null?priceAt(sp.i):null;
+   return `de ${hour(sp.i)} à ${hour(sp.i+1)} : ${sp.val!=null?`${kwhH(sp.val)} kWh ${sp.future?'hier':'achetés'}`:'rien de mesuré'}${e!=null&&sp.val!=null?`, environ ${cents(sp.val*e)} €`:''}${sp.sun!=null?`, ${kwhH(sp.sun)} kWh de soleil`:''}`;};
+  const bars=spokes.map(sp=>{const g=grow(sp.i),k=pick==null?'':dist(sp.i,pick)===0?' on':dist(sp.i,pick)===1?' near':' far';
+   return svg`<g class=${`h${k}`}>${sp.val!=null?svg`<path class=${sp.cls} d=${seg(sp.i,R-(g?2:0),R+3+sp.val/top*L+g)}></path>`:nothing}
+    ${sp.sun!=null?svg`<path class="sun" d=${seg(sp.i,S+(g?2:0),S-3-sp.sun/sunTop*SL-g*.6)}></path>`:nothing}</g>`;});
+  const set=(i?:number)=>{this._hover=i;},tap=(i:number)=>{this._pin=this._pin===i?undefined:i;};
+  const hits=spokes.map(sp=>svg`<path class="hit" d=${seg(sp.i,44,164)} tabindex="0" role="button" aria-label=${say(sp)} aria-pressed=${this._pin===sp.i?'true':'false'}
+   @pointerenter=${()=>set(sp.i)} @focus=${()=>set(sp.i)} @blur=${()=>set()} @click=${()=>tap(sp.i)}
+   @keydown=${(e:KeyboardEvent)=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();tap(sp.i);}else if(e.key==='Escape'){this._pin=undefined;}}}></path>`);
   const live=this._live(v),d=v.direct,b=d?.bandeau,s=v.jusqu_ici,y=v.dernier_jour;
   const centre=live?[`${kw(d!.maison_w)} kW`,'en ce moment']:known&&s?.euros!=null?[`${eur(s.euros)} €`,'depuis minuit']
    :!known&&y?.euros!=null?[`${eur(y.euros)} €`,dayName(y.jour)]:[`${kwh(bought)} kWh`,known?'depuis minuit':dayName(y?.jour)];
+  const picked=pick!=null?spokes[pick]:undefined;
+  const centreSay=picked?[picked.val!=null?`${kwhH(picked.val)} kWh`:'—',`${hour(picked.i)} – ${hour(picked.i+1)}${picked.future?' · hier':''}`,
+   [picked.val!=null&&priceAt(picked.i)!=null?`≈ ${cents(picked.val*priceAt(picked.i)!)} €`:'',picked.sun!=null?`soleil ${kwhH(picked.sun)} kWh`:''].filter(Boolean).join(' · ')]:[centre[0],centre[1],''];
   const sunKwh=known?v.jour?.soleil_kwh:y?.soleil_kwh;
   const priceOk=d?.prix!=null&&!(v.contrat?.a_confirmer??[]).includes('option');
   const next_=d?.prochain_changement?` jusqu'à ${clock(new Date(d.prochain_changement.a))}`:'';
@@ -276,21 +300,24 @@ class HestiaEnergyCard extends LitElement {
   const label=`${known?'Aujourd\'hui':cap(dayName(y?.jour))} heure par heure : ${kwh(bought)} kWh achetés au réseau${sunKwh!=null&&sunKwh>=.05?`, ${kwh(sunKwh)} kWh de soleil`:''}.`;
   const tick=(h:number,t:string,anchor:string,dy=4)=>{const [x,yy]=xy(h,R+L+16).split(' ');return svg`<text x=${x} y=${Number(yy)+dy} text-anchor=${anchor}>${t}</text>`;};
   return html`<div class="clock" data-level=${live&&b?LEVEL[b.couleur]??'ok':'ok'}>
-   <svg class="dial" viewBox="0 0 340 340" role="img" aria-label=${label}>
+   <svg class="dial" viewBox="0 0 340 340" role="group" aria-label=${label} @pointerleave=${()=>set()}>
     <circle class="ring" cx="170" cy="170" r=${R}></circle>
-    <g class="bars"><path class="next" d=${next}></path><path class="off" d=${off}></path><path class="peak" d=${peak}></path><path class="sun" d=${sun}></path></g>
+    <g class=${`bars${pick!=null?' picking':''}`}>${bars}</g>
     ${tick(0,'0 h','middle',0)}${tick(6,'6 h','end')}${tick(12,'12 h','middle',7)}${tick(18,'18 h','start')}
     ${known?svg`<path class="hand" d=${`M${xy(at,R-6)} L${xy(at,R+L+6)}`}></path>
      <circle class="ping" cx=${xy(at,R+L+6).split(' ')[0]} cy=${xy(at,R+L+6).split(' ')[1]} r="4.5"></circle>
      <circle class="tip" cx=${xy(at,R+L+6).split(' ')[0]} cy=${xy(at,R+L+6).split(' ')[1]} r="4.5"></circle>`:nothing}
-    <text class="cv" x="170" y="172">${centre[0]}</text><text class="cl" x="170" y="194">${centre[1]}</text>
+    <text class=${`cv${picked?' pk':''}`} x="170" y=${centreSay[2]?166:172}>${centreSay[0]}</text><text class="cl" x="170" y=${centreSay[2]?188:194}>${centreSay[1]}</text>
+    ${centreSay[2]?svg`<text class="cl cs" x="170" y="206">${centreSay[2]}</text>`:nothing}
+    <g class="hits">${hits}</g>
    </svg>
    <div class="ct">
     ${live&&b?html`<p class="nw-label">En ce moment</p>`:nothing}
     <p class="ctt">${title}</p>${line?html`<p class="ans-w">${line}</p>`:nothing}
     ${stats.length?html`<div class="cstats">${stats.map(([k,val,sub,c])=>html`<div class="cstat" style="--c:var(${c})"><span>${k}</span><b>${val}</b><small>${sub}</small></div>`)}</div>`:nothing}
     <div class="nw-legend"><span><i style="--c:var(--nw-home)"></i>acheté en heures pleines</span>${ranges.length?html`<span><i style="--c:var(--nw-cold)"></i>en heures creuses</span>`:nothing}
-     ${sun?html`<span><i style="--c:var(--nw-sun)"></i>soleil, vers le centre</span>`:nothing}${next?html`<span><i style="--c:color-mix(in srgb, var(--nw-fg) 18%, transparent)"></i>hier, aux heures à venir</span>`:nothing}</div>
+     ${anySun?html`<span><i style="--c:var(--nw-sun)"></i>soleil, vers le centre</span>`:nothing}${anyNext?html`<span><i style="--c:color-mix(in srgb, var(--nw-fg) 18%, transparent)"></i>hier, aux heures à venir</span>`:nothing}
+     <span class="hint">touchez une heure pour ses chiffres</span></div>
    </div>
   </div>`;
  }
