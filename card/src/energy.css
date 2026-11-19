@@ -168,6 +168,27 @@ button.piste:focus-visible { outline:2px solid var(--nw-accent); outline-offset:
 .piste .pe b { display:block; font-size:var(--nw-fs-case); font-weight:600; letter-spacing:-.015em; line-height:1.1; }
 .piste .pe small { font-size:var(--nw-fs-small); color:var(--nw-fg2); }
 /* What one more piece of equipment would bring: dashed, never counted as advice. */
+/* « Pour économiser » (maquette D) : aujourd'hui → mieux → gain. Sur un téléphone, l'un sous l'autre. */
+.pistes.better { grid-template-columns:1fr; }
+.piste.wide { grid-template-columns:auto minmax(0,1fr) auto; gap:8px 12px; }
+.piste.wide .ico { grid-column:1; grid-row:1; }
+.piste.wide .bt { grid-column:2; grid-row:1; font-size:var(--nw-fs-text); font-weight:700; line-height:1.3; }
+.piste.wide .pe { grid-column:3; grid-row:1; }
+.piste.wide .pe small { display:block; max-width:150px; margin-left:auto; }
+.piste.wide .bn, .piste.wide .bm { grid-column:1 / -1; font-size:var(--nw-fs-small); line-height:1.45; color:var(--nw-fg2); min-width:0; }
+.piste.wide .bn { grid-row:2; } .piste.wide .bm { grid-row:3; color:var(--nw-fg); font-weight:600; }
+.piste.wide .bn small, .piste.wide .bm small { display:block; font-size:10.5px; letter-spacing:.1em; text-transform:uppercase; font-weight:700; color:var(--nw-fg2); margin-bottom:2px; }
+.piste.wide .ba { display:none; }
+.hrs { display:block; width:100%; max-width:300px; margin-top:6px; }
+.hrs-b { display:flex; gap:1px; height:10px; border-radius:4px; overflow:hidden; background:color-mix(in srgb, var(--nw-fg) 6%, transparent); }
+.hrs-b i { flex:1; background:var(--h, transparent); }
+.hrs-x { display:flex; justify-content:space-between; font-size:10px; color:var(--nw-fg2); margin-top:2px; font-weight:400; letter-spacing:0; }
+@container (min-width:680px) {
+ .piste.wide { grid-template-columns:auto 150px minmax(0,1fr) 20px minmax(0,1fr) 130px; gap:0 14px; }
+ .piste.wide .bn, .piste.wide .bm, .piste.wide .ba, .piste.wide .pe { grid-row:1; }
+ .piste.wide .bn { grid-column:3; } .piste.wide .ba { grid-column:4; display:block; color:var(--nw-fg2); font-size:18px; text-align:center; }
+ .piste.wide .bm { grid-column:5; } .piste.wide .pe { grid-column:6; }
+}
 .piste.up { background:none; border:1px dashed var(--nw-line); }
 .piste.up .pt { font-weight:600; }
 .piste.up .ico { background:color-mix(in srgb, var(--nw-fg) 6%, transparent); color:var(--nw-fg2); }

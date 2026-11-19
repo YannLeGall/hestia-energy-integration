@@ -1,3 +1,18 @@
+## À venir
+
+### Améliorations
+
+- « Pour économiser » dit chaque conseil en trois temps : ce qui se fait aujourd'hui, ce qui serait mieux, et ce que ça rapporte. Le chauffe-eau et chaque machine y ont leur ligne, rangée par euros avec la veille et le chauffage.
+- Pour le chauffe-eau et les machines, une frise de 24 heures montre quand ils tournent aujourd'hui, et quand ils tourneraient mieux.
+- Le chauffe-eau : Hestia voit s'il est programmé à heure fixe et à quelle heure. Avec des panneaux, elle dit les mois où le soleil ne l'atteint pas et conseille la nuit pour ces mois-là seulement.
+- Les machines : l'heure où elles démarrent le plus souvent, combien de cycles sur 10 tombent au prix fort, et le gain par lavage ou par séchage. Un départ différé déjà utilisé est salué.
+- La veille : le gain est dit pour 50 W coupés, pas pour toute la veille.
+- « Votre contrat, bien utilisé » garde la jauge des heures creuses et le verdict de l'option.
+
+### Corrections
+
+- Le soleil pris par un appareil : quand le chauffe-eau mange tout le surplus des panneaux, la maison ne revend plus rien. Hestia comptait alors ces heures en heures pleines. Elle compte maintenant le soleil qu'il y aurait eu sans l'appareil.
+
 ## 1.0.0b2 — Votre contrat, bien utilisé
 
 ### Nouveautés
