@@ -11,7 +11,7 @@
 
 **Le conseiller énergie de la maison.** Hestia Énergie lit ce que votre Home Assistant sait déjà de votre consommation. Elle dit en euros où part l’argent de l’électricité et de l’eau, ce qui tourne la nuit, et ce qui ferait économiser.
 
-> **Préversion (bêta) 1.0.0b1.** Elle tourne chaque jour sur une vraie maison depuis début novembre 2026. Certains cas n’ont pas encore pu être vérifiés : voir [les limites de cette bêta](#les-limites-de-cette-bêta).
+> **Préversion (bêta) 1.0.0b2.** Elle tourne chaque jour sur une vraie maison depuis début novembre 2026. Certains cas n’ont pas encore pu être vérifiés : voir [les limites de cette bêta](#les-limites-de-cette-bêta).
 
 ## Pourquoi
 
@@ -118,7 +118,7 @@ Une seule carte, **Hestia Énergie**, en plusieurs formats. Chacun répond à un
 
 | Format | Ce qu’il montre |
 | --- | --- |
-| **Complète** (par défaut) | En haut, l’horloge de la journée : un trait par heure, ce qui est acheté (heures pleines et creuses) et le soleil, avec le prix du moment. Puis en ce moment, aujourd’hui, ce mois-ci, puis « En détail » : un appui sur un encart ouvre sa carte de détail. Jusqu’à 3 conseils « Pour économiser ». |
+| **Complète** (par défaut) | En haut, l’horloge de la journée : un trait par heure, ce qui est acheté (heures pleines et creuses) et le soleil, avec le prix du moment. Puis en ce moment, aujourd’hui, ce mois-ci, « Votre contrat, bien utilisé » (en heures creuses : sur 12 mois, la part de la nuit, si l’option est la bonne, et ce que rapporteraient le chauffe-eau et les machines au bon moment), jusqu’à 3 conseils « Pour économiser », puis « En détail » : un appui sur un encart ouvre sa carte de détail. |
 | **Tuile** | En ce moment : une phrase, un chiffre. « La maison consomme 1,3 kW. » Quand il n’y a rien à faire, le meilleur conseil. |
 | **Conseils** | Ce qui ferait économiser, en euros par an, du plus rentable au moins rentable. |
 | **Soleil** | Ce que les panneaux ont produit aujourd’hui, groupe par groupe. |

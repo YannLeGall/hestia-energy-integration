@@ -44,7 +44,12 @@ type View={pret:boolean;palier:number;equipement:{direct?:boolean;soleil?:boolea
  soleil_jour?:{plus_fort:{h:number;kwh:number}|null;prix_evite:number|null;groupes:{nom:string;kwh:number}[]};
  appareils_jour?:{appareils:{nom:string;kwh:number;euros:number|null}[];mesure_kwh:number;maison_kwh:number;sans_prise_kwh:number|null;prix_moyen:number|null}|null;
  pointe?:{h:number;kw:number;part:number|null}|null;
- chauffage?:{etat:string;mois?:Heat|null;saison?:(Heat&{du:string})|null;euros_par_degre?:number|null;poele?:Stove|null}};
+ chauffage?:{etat:string;mois?:Heat|null;saison?:(Heat&{du:string})|null;euros_par_degre?:number|null;poele?:Stove|null};
+ usage?:Usage|null};
+/** « Votre contrat, bien utilisé » (engine/habits.py): the last 12 months. */
+type Device={nom:string;type:string;kwh:number;soleil:number;nuit:number;pleines:number;pleines_kwh:number;euros_an:number};
+type Usage={jours:number;part_hc:number;seuil_hc:number|null;part_hc_chauffe_eau:number|null;base_de_plus:number|null;
+ prix:{soleil:number|null;hc:number;hp:number};appareils:Device[];euros_an:number;soleil_mois:{mois:string;jours:number;sur:number}[]};
 type Config={type:string;card?:string;name?:string};
 
 const RUBRICS=['soleil','chauffage','veille','eau','appareils','pointe','contrat'] as const;
@@ -102,6 +107,7 @@ const BANNER_ICON:Record<string,string>={fuite_eau:'drop',disjoncteur:'bolt',cha
 const hour=(h:number)=>h===12?'midi':h===0||h===24?'minuit':`${h} h`;
 /** An hour of the contract (« 0 h 14 ») kept on one line. */
 const nb=(t:string)=>t.replace(/ /g,' ');
+const names=(n:string[])=>n.map((x,i)=>i?x.toLowerCase():x).reduce((a,x,i,all)=>i===0?x:a+(i===all.length-1?' et ':', ')+x,'');
 const clock=(d:Date)=>d.getHours()+' h '+String(d.getMinutes()).padStart(2,'0');
 const noon=(iso:string)=>new Date(iso+'T12:00:00');
 const dayOf=(iso:string)=>{const d=noon(iso).getDate();return d===1?'1er':String(d);};
@@ -235,6 +241,7 @@ class HestiaEnergyCard extends LitElement {
    ${dial??(b&&this._live(v)?html`<div class="nw-band nw-glass" data-level=${LEVEL[b.couleur]??'ok'}><div class="nw-band-row"><span class="nw-band-pic box">${icon(BANNER_ICON[b.id]??'home')}</span>
     <div class="nw-band-text"><p class="nw-band-kicker">En ce moment</p><p class="nw-band-title">${b.titre}</p>${b.pourquoi||this._periodSay(v)?html`<p class="nw-band-line">${b.pourquoi||this._periodSay(v)}</p>`:nothing}</div></div></div>`:nothing)}
    <div class="periods${secs.length===2?' two':''}">${secs}</div>
+   ${v.usage?this._section('usage','Votre contrat, bien utilisé','sur 12 mois',this._usage(v)):nothing}
    ${v.pistes?.length?this._section('save','Pour économiser','à froid, en euros',html`<div class="pistes">${v.pistes.slice(0,3).map(p=>this._piste(p))}</div>`):nothing}
    ${this._section('more','En détail','touchez pour ouvrir',html`<div class="more">${this._goes(v)}</div>`)}
   </ha-card>`;
@@ -430,6 +437,53 @@ class HestiaEnergyCard extends LitElement {
   return null;
  }
 
+ /* ── « Votre contrat, bien utilisé » (maquette A, chosen by Frank on 19 Nov. 2026): the year's share of off-peak purchases
+    against the share from which they pay, whether the option is the right one, and the devices that can wait, the most
+    euros first. With panels the sun comes first (« au soleil, sinon la nuit »). A touch opens the contract's card. ── */
+ private _usage(v:View){
+  const u=v.usage!,night=atNight(offpeak(v.heures_creuses)),sun=!!v.equipement.soleil,when=night?'la nuit':'en heures creuses';
+  const first=v.heures_creuses?.[0]?.[0],after=first?`après ${nb(first)}`:when;
+  const heater=u.appareils.find(a=>a.type==='chauffe_eau'&&a.euros_an>=2),machines=u.appareils.filter(a=>a.type==='machine'&&a.euros_an>=1);
+  const mGain=machines.reduce((a,m)=>a+m.euros_an,0),pc=(x:number)=>Math.round(x*100);
+  const better=u.part_hc_chauffe_eau!=null&&heater&&u.part_hc_chauffe_eau-u.part_hc>=.02?u.part_hc_chauffe_eau:null;
+  const month=v.contrat?.part_hc;
+  const gauge=html`<div class="u-gauge"><p class="u-k">Vos achats pris ${when}</p>
+    <p class="u-v"><b>${pc(u.part_hc)} %</b>${better!=null?html`<span>→ <b class="ok">${pc(better)} %</b> avec le chauffe-eau ${when}</span>`:nothing}</p>
+    <div class="track" style="--c:var(--nw-cold)">${better!=null?html`<i class="next" style="width:${better*100}%"></i>`:nothing}<i style="width:${u.part_hc*100}%"></i>
+     ${u.seuil_hc!=null?html`<span class="mark" style="left:${Math.min(100,u.seuil_hc*100)}%"></span>`:nothing}</div>
+    <div class="track-l"><span>sur 12 mois</span>${u.seuil_hc!=null?html`<span>rentable dès <b>${pc(u.seuil_hc)} %</b></span>`:nothing}</div>
+    ${month!=null&&Math.abs(month-u.part_hc)>=.05?html`<p class="u-n">Ce mois-ci : ${pc(month)} %.${month<u.part_hc&&heater?' En hiver, le chauffe-eau chauffe sans soleil, en heures pleines.':''}</p>`:nothing}</div>`;
+  const more=u.base_de_plus,saves=heater!=null&&more!=null&&more<0&&heater.euros_an>-more;
+  const verdict=more==null?nothing:more>=0?html`<div class="u-verdict good"><p class="u-k">Votre option heures creuses</p><p class="u-big">C'est la bonne</p>
+    <p class="u-n">En Base, ces 12 mois auraient coûté <b>${eur(more)} € de plus</b>.${heater?html` Avec le chauffe-eau ${when}, l'écart passerait à <b>${num(more+heater.euros_an,0)} €</b>.`:''}</p></div>`
+   :html`<div class="u-verdict"><p class="u-k">Votre option heures creuses</p><p class="u-big">${saves?'Rentable, si…':'La Base coûterait moins'}</p>
+    <p class="u-n">En Base, ces 12 mois auraient coûté <b>${eur(-more)} € de moins</b>.${saves?` Avec le chauffe-eau ${when}, les heures creuses redeviendraient rentables.`:''}</p></div>`;
+  const row=(ic:string,c:string,t:string,w:unknown,e:number)=>html`<button class="piste" style="--c:var(${c})" @click=${()=>{this._open='contrat';}}>
+    <span class="ico" style="--c:var(${c})">${icon(ic)}</span><span class="pt">${t}</span><span class="pw">${w}</span>
+    <span class="pe"><b>${num(e,0)} €</b><small>par an</small></span></button>`;
+  const rows=[
+   heater?row('drop','--nw-cold',`${heater.nom} : ${sun?`au soleil d'abord, sinon ${when}`:when}`,
+    html`<b>${kwh(heater.pleines_kwh)} kWh</b> par an pris en heures pleines${sun?', sans soleil':''}.${sun&&heater.soleil>=.1?` Déjà ${pc(heater.soleil)} % au soleil.`:''}`,heater.euros_an):nothing,
+   machines.length?row('clock','--nw-home',`${names(machines.map(m=>m.nom))} : ${sun?`au soleil, sinon ${after}`:after}`,
+    `En heures pleines${sun?' sans soleil':''} : `+machines.map(m=>`${m.nom.toLowerCase()} ${pc(m.pleines)} %`).join(', ')+' du temps.',mGain):nothing];
+  return html`<div class="usage"><div class="u-top">${gauge}${verdict}</div><div class="pistes">${rows}</div></div>`;
+ }
+ /** « Quand tournent vos machines » (maquette C): each device that can wait, its year in the sun, at night and in paid
+     peak hours; then each month's days with sun to spare for a machine. */
+ private _machines(v:View){
+  const u=v.usage;if(!u?.appareils.length)return nothing;
+  const sun=!!v.equipement.soleil,night=atNight(offpeak(v.heures_creuses)),pc=(x:number)=>Math.round(x*100);
+  const p=u.prix,say=html`${sun&&p.soleil!=null?html`Au soleil, un kWh ne coûte que la revente perdue, <b>${price(p.soleil)} €</b> ; `:''}${night?'la nuit':'en heures creuses'}, <b>${price(p.hc)} €</b> ; en heures pleines, <b>${price(p.hp)} €</b>.`;
+  const bars=html`<div class="mach">${u.appareils.map(a=>html`<span class="mn">${a.nom}<small>${kwh(a.kwh)} kWh par an</small></span>
+    <span class="stack" role="img" aria-label="${sun?`${pc(a.soleil)} % au soleil, `:''}${pc(a.nuit)} % ${night?'la nuit':'en heures creuses'}, ${pc(a.pleines)} % en heures pleines">${sun?html`<i style="width:${a.soleil*100}%;--c:var(--nw-sun)"></i>`:nothing}<i style="width:${a.nuit*100}%;--c:var(--nw-cold)"></i><i style="width:${a.pleines*100}%;--c:var(--nw-home)"></i></span>
+    <span class="me">${a.euros_an>=1?html`<b>${num(a.euros_an,0)} €</b><small>par an</small>`:html`<small>rien à gagner</small>`}</span>`)}</div>
+   <div class="nw-legend">${sun?html`<span><i style="--c:var(--nw-sun)"></i>au soleil</span>`:nothing}<span><i style="--c:var(--nw-cold)"></i>${night?'la nuit':'en heures creuses'}</span><span><i style="--c:var(--nw-home)"></i>en heures pleines</span></div>`;
+  const months=u.soleil_mois.filter(m=>m.sur>=20),letters='JFMAMJJASOND';
+  const sunny=sun&&months.length>=6?this._enc('Du soleil en trop, mois par mois',`Les jours où le soleil en trop suffit pour une machine. Les autres jours, Hestia dit d'attendre ${night?'la nuit':'les heures creuses'}, d'après la prévision du jour.`,
+   html`<div class="smonths">${months.map(m=>html`<span class="sm" title="${m.jours} jours sur ${m.sur}"><i style="height:${Math.max(4,m.jours/m.sur*100)}%"></i><small>${letters[Number(m.mois.slice(5))-1]}</small></span>`)}</div>`,{wide:true}):nothing;
+  return html`${this._enc('Quand tournent vos machines',say,bars,{wide:true,aside:'12 derniers mois'})}${sunny}`;
+ }
+
  /* ── Advice « à froid »: one line each, the gesture and what it brings; a touch opens its detail card ── */
  private _saySave(p:Piste){return html`Pour économiser : ${p.titre.charAt(0).toLowerCase()+p.titre.slice(1)}, <b>${num(p.euros_an!,0)} € ${p.unite??'par an'}</b>.`;}
  private _piste(p:Piste){
@@ -622,7 +676,11 @@ class HestiaEnergyCard extends LitElement {
   const label=v.heures_creuses?.length?v.heures_creuses.map(([a,b])=>`${nb(a)} à ${nb(b)}`).join(' et de '):null;
   const nowMin=now.getHours()*60+now.getMinutes(),off=c.prix_hp&&c.prix_hc?1-c.prix_hc/c.prix_hp:null;
   const share=c.part_hc,seuil=c.seuil_hc,mois=v.mois?.euros,gain=c.base_euros!=null&&mois!=null?c.base_euros-mois:null;
-  const pays=share!=null&&seuil!=null?this._enc('Les heures creuses rapportent-elles ?',html`Ce mois-ci, <b>${Math.round(share*100)} %</b> de vos achats sont tombés ${night?'la nuit':'en heures creuses'}. Elles rapportent à partir de <b>${Math.round(seuil*100)} %</b>${gain!=null?html` : sans elles (option Base), vous auriez payé <b>${eur(Math.abs(gain))} € de ${gain<0?'moins':'plus'}</b>`:''}.`,
+  const u=v.usage;
+  const pays=u&&u.seuil_hc!=null?this._enc('Les heures creuses rapportent-elles ?',html`Sur 12 mois, <b>${Math.round(u.part_hc*100)} %</b> de vos achats sont tombés ${night?'la nuit':'en heures creuses'}${share!=null?` (ce mois-ci ${Math.round(share*100)} %)`:''}. Elles rapportent à partir de <b>${Math.round(u.seuil_hc*100)} %</b>${u.base_de_plus!=null?html` : en Base, vous auriez payé <b>${eur(Math.abs(u.base_de_plus))} € de ${u.base_de_plus>=0?'plus':'moins'}</b>`:''}.`,
+   html`<div><div class="track" style="--c:var(--nw-cold)"><i style="width:${u.part_hc*100}%"></i><span class="mark" style="left:${Math.min(100,u.seuil_hc*100)}%"></span></div>
+    <div class="track-l"><span>vous <b>${Math.round(u.part_hc*100)} %</b></span><span>rentable dès <b>${Math.round(u.seuil_hc*100)} %</b></span></div></div>`)
+   :share!=null&&seuil!=null?this._enc('Les heures creuses rapportent-elles ?',html`Ce mois-ci, <b>${Math.round(share*100)} %</b> de vos achats sont tombés ${night?'la nuit':'en heures creuses'}. Elles rapportent à partir de <b>${Math.round(seuil*100)} %</b>${gain!=null?html` : sans elles (option Base), vous auriez payé <b>${eur(Math.abs(gain))} € de ${gain<0?'moins':'plus'}</b>`:''}.`,
    html`<div><div class="track" style="--c:var(--nw-cold)"><i style="width:${share*100}%"></i><span class="mark" style="left:${Math.min(100,seuil*100)}%"></span></div>
     <div class="track-l"><span>vous <b>${Math.round(share*100)} %</b></span><span>rentable dès <b>${Math.round(seuil*100)} %</b></span></div></div>`):nothing;
   const first=v.heures_creuses?.[0];void label;
@@ -632,7 +690,7 @@ class HestiaEnergyCard extends LitElement {
     ${ranges.length?this._enc('Votre journée',off!=null?html`En bleu, les heures creuses : tout ce qui peut attendre y coûte <b>${part(off)} de moins</b>.`:'En bleu, les heures creuses.',
      html`<div><div class="day">${ranges.map(([a,b])=>html`<i style="left:${a/14.4}%;width:${(b-a)/14.4}%"></i>`)}<span class="now" style="left:${nowMin/14.4}%"></span></div>${H_TICKS}</div>`,
      {wide:true,aside:`il est ${clock(now)}`}):nothing}
-    ${prices}${pays}
+    ${prices}${pays}${this._machines(v)}
    </div>`;
  }
 }
