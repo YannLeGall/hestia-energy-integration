@@ -310,7 +310,17 @@ def advices(found: dict | None, contract, sun: bool) -> list[dict]:
         else:
             item = _machine(d, at, night_hours, window, gap)
         if item is not None:
-            out.append({"rubrique": "contrat", "unite": "par an", "profil": d["profil"], **item})
+            # The two clock times the card pins on its strips (Frank, 20 Nov.: « on ne sait pas quand il tourne et à
+            # quelle heure le faire tourner »): when it starts today, when to start it.
+            # A machine that runs at any hour has no start time worth a pin.
+            if d["type"] == "chauffe_eau":
+                first = d["depart"]
+            elif d["en_differe"] >= 0.4 and d.get("depart_nuit") is not None:
+                first = d["depart_nuit"]
+            else:
+                first = d["depart"] if d["depart_part"] >= 0.15 else None
+            out.append({"rubrique": "contrat", "unite": "par an", "profil": d["profil"],
+                        "depart": first * 60 if first is not None else None, "lancer": start, **item})
     return out
 
 

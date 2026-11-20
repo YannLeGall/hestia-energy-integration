@@ -1,3 +1,10 @@
+## À venir
+
+### Améliorations
+
+- « Pour économiser » : les frises disent l'heure. Un repère marque l'heure où l'appareil démarre le plus souvent (« Il démarre le plus souvent à 19 h ») et celle où le lancer (« Lancez-le à 0 h 30 ou au soleil »). Les heures où il tourne sont des blocs d'une seule couleur (rouge en heures pleines, bleu en heures creuses, jaune au soleil), et chaque bloc est dit en mots sous la frise (« de 19 h à 23 h, en heures pleines »).
+- « En ce moment » ne liste plus ce qui est en marche : la carte Appareils le dit déjà.
+
 ## 1.0.0b3 — Pour économiser, en trois temps
 
 ### Améliorations
