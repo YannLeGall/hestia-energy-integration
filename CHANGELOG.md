@@ -1,4 +1,4 @@
-## À venir
+## 1.0.0b4 — Des frises qui disent l'heure
 
 ### Améliorations
 
