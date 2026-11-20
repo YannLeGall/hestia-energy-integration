@@ -1,4 +1,4 @@
-## À venir
+## 1.0.0b5 — Une frise par appareil
 
 ### Améliorations
 

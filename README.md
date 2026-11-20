@@ -11,7 +11,7 @@
 
 **Le conseiller énergie de la maison.** Hestia Énergie lit ce que votre Home Assistant sait déjà de votre consommation. Elle dit en euros où part l’argent de l’électricité et de l’eau, ce qui tourne la nuit, et ce qui ferait économiser.
 
-> **Préversion (bêta) 1.0.0b4.** Elle tourne chaque jour sur une vraie maison depuis début novembre 2026. Certains cas n’ont pas encore pu être vérifiés : voir [les limites de cette bêta](#les-limites-de-cette-bêta).
+> **Préversion (bêta) 1.0.0b5.** Elle tourne chaque jour sur une vraie maison depuis début novembre 2026. Certains cas n’ont pas encore pu être vérifiés : voir [les limites de cette bêta](#les-limites-de-cette-bêta).
 
 ## Pourquoi
 
