@@ -13,6 +13,7 @@ import dataclasses
 from datetime import date, datetime, timedelta
 import logging
 import re
+import time
 from zoneinfo import ZoneInfo
 
 from homeassistant.const import EVENT_HOMEASSISTANT_STARTED
@@ -109,6 +110,7 @@ class EnergyCoordinator:
         self._last_full: datetime | None = None
         self._live_pending = None
         self._refreshing = asyncio.Lock()
+        self.last_duration: float | None = None
         self._stopped = False
         self._retry = None
         self._failed = False
@@ -291,7 +293,10 @@ class EnergyCoordinator:
             return
         try:
             async with self._refreshing:
+                began = time.monotonic()
                 await self._refresh(full)
+                # How long the last report took, said on the hub's overview (« Le calcul »).
+                self.last_duration = time.monotonic() - began
         except Exception:  # noqa: BLE001 - the brick goes on with its last figures
             if not self._failed:
                 _LOGGER.exception("Hestia Énergie : bilans non refaits, les derniers chiffres restent ; nouvel essai dans 5 min")
