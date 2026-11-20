@@ -55,9 +55,10 @@ type Config={type:string;card?:string;name?:string};
 
 const RUBRICS=['soleil','chauffage','veille','eau','appareils','pointe','contrat'] as const;
 /** Advice « à froid » (maquette des cartes 3): a gesture, why, and the euros at stake a year or a winter. */
-type Piste={id:string;titre:string;pourquoi:string;euros_an:number|null;unite:string|null;rubrique:string|null};
+type Piste={id:string;titre:string;pourquoi:string;euros_an:number|null;unite:string|null;rubrique:string|null;
+ nom?:string;maintenant?:string;mieux?:string;gain?:number;sous?:string;profil?:[number,number,number][];mieux_heures?:[number,number,string][]};
 const PISTE_LOOK:Record<string,[string,string]>={veille_haute:['moon','--nw-watch'],chauffage_degre:['flame','--nw-heat'],contrat_base:['doc','--nw-ok'],
- jour_inhabituel:['home','--nw-home'],budget_mois:['doc','--nw-home']};
+ jour_inhabituel:['home','--nw-home'],budget_mois:['doc','--nw-home'],chauffe_eau_heures:['drop','--nw-cold'],machine_heures:['clock','--nw-home']};
 type Rubric=typeof RUBRICS[number];
 
 /* Icons of the mock-up, drawn at the stroke (constants: never built from data). */
@@ -108,7 +109,6 @@ const BANNER_ICON:Record<string,string>={fuite_eau:'drop',disjoncteur:'bolt',cha
 const hour=(h:number)=>h===12?'midi':h===0||h===24?'minuit':`${h} h`;
 /** An hour of the contract (« 0 h 14 ») kept on one line. */
 const nb=(t:string)=>t.replace(/ /g,' ');
-const names=(n:string[])=>n.map((x,i)=>i?x.toLowerCase():x).reduce((a,x,i,all)=>i===0?x:a+(i===all.length-1?' et ':', ')+x,'');
 const clock=(d:Date)=>d.getHours()+' h '+String(d.getMinutes()).padStart(2,'0');
 const noon=(iso:string)=>new Date(iso+'T12:00:00');
 const dayOf=(iso:string)=>{const d=noon(iso).getDate();return d===1?'1er':String(d);};
@@ -243,7 +243,7 @@ class HestiaEnergyCard extends LitElement {
     <div class="nw-band-text"><p class="nw-band-kicker">En ce moment</p><p class="nw-band-title">${b.titre}</p>${b.pourquoi||this._periodSay(v)?html`<p class="nw-band-line">${b.pourquoi||this._periodSay(v)}</p>`:nothing}</div></div></div>`:nothing)}
    <div class="periods${secs.length===2?' two':''}">${secs}</div>
    ${v.usage?this._section('usage','Votre contrat, bien utilisé','sur 12 mois',this._usage(v)):nothing}
-   ${v.pistes?.length?this._section('save','Pour économiser','à froid, en euros',html`<div class="pistes">${v.pistes.slice(0,3).map(p=>this._piste(p))}</div>`):nothing}
+   ${v.pistes?.length?this._section('save','Pour économiser','sur 12 mois, en euros',html`<div class="pistes better">${v.pistes.slice(0,6).map(p=>p.maintenant?this._better(p):this._piste(p))}</div>`):nothing}
    ${this._section('more','En détail','touchez pour ouvrir',html`<div class="more">${this._goes(v)}</div>`)}
   </ha-card>`;
  }
@@ -439,13 +439,11 @@ class HestiaEnergyCard extends LitElement {
  }
 
  /* ── « Votre contrat, bien utilisé » (maquette A, chosen by Frank on 19 Nov. 2026): the year's share of off-peak purchases
-    against the share from which they pay, whether the option is the right one, and the devices that can wait, the most
-    euros first. With panels the sun comes first (« au soleil, sinon la nuit »). A touch opens the contract's card. ── */
+    against the share from which they pay, and whether the option and the power are the right ones. The devices that can
+    wait are said in « Pour économiser » (maquette D, Frank on 19 Nov. 2026: today → better → the gain). ── */
  private _usage(v:View){
-  const u=v.usage!,night=atNight(offpeak(v.heures_creuses)),sun=!!v.equipement.soleil,when=night?'la nuit':'en heures creuses';
-  const first=v.heures_creuses?.[0]?.[0],after=first?`après ${nb(first)}`:when;
-  const heater=u.appareils.find(a=>a.type==='chauffe_eau'&&a.euros_an>=2),machines=u.appareils.filter(a=>a.type==='machine'&&a.euros_an>=1);
-  const mGain=machines.reduce((a,m)=>a+m.euros_an,0),pc=(x:number)=>Math.round(x*100);
+  const u=v.usage!,night=atNight(offpeak(v.heures_creuses)),when=night?'la nuit':'en heures creuses';
+  const heater=u.appareils.find(a=>a.type==='chauffe_eau'&&a.euros_an>=2),pc=(x:number)=>Math.round(x*100);
   const better=u.part_hc_chauffe_eau!=null&&heater&&u.part_hc_chauffe_eau-u.part_hc>=.02?u.part_hc_chauffe_eau:null;
   const month=v.contrat?.part_hc;
   const gauge=html`<div class="u-gauge"><p class="u-k">Vos achats pris ${when}</p>
@@ -463,17 +461,9 @@ class HestiaEnergyCard extends LitElement {
     <p class="u-n">En Base, ces 12 mois auraient coûté <b>${eur(more)} € de plus</b>.${heater?html` Avec le chauffe-eau ${when}, l'écart passerait à <b>${num(more+heater.euros_an,0)} €</b>.`:''}</p>${kva}</div>`
    :html`<div class="u-verdict"><p class="u-k">Votre option heures creuses</p><p class="u-big">${saves?'Rentable, si…':'La Base coûterait moins'}</p>
     <p class="u-n">En Base, ces 12 mois auraient coûté <b>${eur(-more)} € de moins</b>.${saves?` Avec le chauffe-eau ${when}, les heures creuses redeviendraient rentables.`:''}</p>${kva}</div>`;
-  const row=(ic:string,c:string,t:string,w:unknown,e:number)=>html`<button class="piste" style="--c:var(${c})" @click=${()=>{this._open='contrat';}}>
-    <span class="ico" style="--c:var(${c})">${icon(ic)}</span><span class="pt">${t}</span><span class="pw">${w}</span>
-    <span class="pe"><b>${num(e,0)} €</b><small>par an</small></span></button>`;
-  const rows=[
-   heater?row('drop','--nw-cold',`${heater.nom} : ${sun?`au soleil d'abord, sinon ${when}`:when}`,
-    html`<b>${kwh(heater.pleines_kwh)} kWh</b> par an pris en heures pleines${sun?', sans soleil':''}.${sun&&heater.soleil>=.1?` Déjà ${pc(heater.soleil)} % au soleil.`:''}`,heater.euros_an):nothing,
-   machines.length?row('clock','--nw-home',`${names(machines.map(m=>m.nom))} : ${sun?`au soleil, sinon ${after}`:after}`,
-    `En heures pleines${sun?' sans soleil':''} : `+machines.map(m=>`${m.nom.toLowerCase()} ${pc(m.pleines)} %`).join(', ')+' du temps.',mGain):nothing];
   const side=verdict===nothing?(pw&&lo?html`<div class="u-verdict"><p class="u-k">Votre contrat</p>${kva}</div>`:nothing)
    :html`${verdict}`;
-  return html`<div class="usage"><div class="u-top">${gauge}${side}</div><div class="pistes">${rows}</div></div>`;
+  return html`<div class="usage"><div class="u-top">${gauge}${side}</div></div>`;
  }
  /** « Quand tournent vos machines » (maquette C): each device that can wait, its year in the sun, at night and in paid
      peak hours; then each month's days with sun to spare for a machine. */
@@ -493,6 +483,34 @@ class HestiaEnergyCard extends LitElement {
 
  /* ── Advice « à froid »: one line each, the gesture and what it brings; a touch opens its detail card ── */
  private _saySave(p:Piste){return html`Pour économiser : ${p.titre.charAt(0).toLowerCase()+p.titre.slice(1)}, <b>${num(p.euros_an!,0)} € ${p.unite??'par an'}</b>.`;}
+ /** « Pour économiser » as maquette D says it (Frank, 19 Nov. 2026): today, better, the gain; for the water heater and
+     the machines, a strip of the 24 hours under each (when they run now, when they would). */
+ private _better(p:Piste){
+  // French spacing: no line break before « : », « % », « € », nor inside « 0 h 30 » or « 190 W ».
+  const fr=(t:string)=>t.replace(/ ([:;!?%€])/g,'\u00a0$1').replace(/(\d) (?=(W|kWh|h|centimes)(\s|$|[ .,:]))/g,'$1\u00a0').replace(/ h (\d)/g,'\u00a0h\u00a0$1');
+  const [ic,c]=PISTE_LOOK[p.id]??['home','--nw-home'],key=p.rubrique&&(RUBRICS as readonly string[]).includes(p.rubrique)?p.rubrique as Rubric:undefined;
+  const shown=p.gain??p.euros_an;
+  const body=html`<span class="ico" style="--c:var(${c})">${icon(ic)}</span><span class="bt">${p.nom??p.titre}</span>
+   <span class="bn"><small>Aujourd'hui</small>${fr(p.maintenant!)}${p.profil?this._hoursNow(p.profil):nothing}</span>
+   <span class="ba" aria-hidden="true">→</span>
+   <span class="bm"><small>Mieux</small>${fr(p.mieux??'')}${p.mieux_heures?this._hoursBetter(p.mieux_heures):nothing}</span>
+   ${shown!=null?html`<span class="pe"><b>${num(shown,0)} €</b><small>${fr(p.sous??p.unite??'par an')}</small></span>`:nothing}`;
+  return key?html`<button class="piste wide" style="--c:var(${c})" @click=${()=>{this._open=key;}}>${body}</button>`:html`<div class="piste wide" style="--c:var(${c})">${body}</div>`;
+ }
+ /** The hours a device runs now: each hour coloured by what paid most of it (sun, off-peak, peak), as strong as its share. */
+ private _hoursNow(profil:[number,number,number][]){
+  const top=Math.max(...profil.map(h=>h[0]+h[1]+h[2]),1e-9),col=['--nw-sun','--nw-cold','--nw-home'];
+  return this._hours(profil.map(h=>{const t=h[0]+h[1]+h[2];if(t<top*.08)return null;const i=h.indexOf(Math.max(...h));return [col[i],Math.max(.35,t/top)] as [string,number];}));
+ }
+ private _hoursBetter(spans:[number,number,string][]){
+  const cells:([string,number]|null)[]=Array(24).fill(null);
+  for(const [a,b,what] of spans)for(let h=a;h<b;h++)cells[h%24]=[what==='soleil'?'--nw-sun':'--nw-cold',1];
+  return this._hours(cells);
+ }
+ private _hours(cells:([string,number]|null)[]){
+  return html`<span class="hrs" aria-hidden="true"><span class="hrs-b">${cells.map(x=>x?html`<i style="--h:var(${x[0]});opacity:${x[1].toFixed(2)}"></i>`:html`<i></i>`)}</span>
+   <span class="hrs-x"><span>0 h</span><span>6 h</span><span>12 h</span><span>18 h</span><span>24 h</span></span></span>`;
+ }
  private _piste(p:Piste){
   const [ic,c]=PISTE_LOOK[p.id]??['home','--nw-home'],key=p.rubrique&&(RUBRICS as readonly string[]).includes(p.rubrique)?p.rubrique as Rubric:undefined;
   const body=html`<span class="ico" style="--c:var(${c})">${icon(ic)}</span><span class="pt">${p.titre}</span><span class="pw">${p.pourquoi}</span>

@@ -627,9 +627,11 @@ class EnergyCoordinator:
             "douze_mois": hub.twelve_months(home, self.contract, self.table, now),
             "pointe": cards.peak_today(hours_today, kva),
             # Advice « à froid » (engine/daily.py): habits and contract, with the euros a year at stake.
-            "pistes": daily.advices(home, self.contract, self.table, now, self.cold, self.weather_cold == "oui", price,
-                                    report.month(home, self.contract, self.table, local.year - 1, local.month),
-                                    report.projection(month, min(now, known) if known else now)),
+            "pistes": _with_devices(
+                daily.advices(home, self.contract, self.table, now, self.cold, self.weather_cold == "oui", price,
+                              report.month(home, self.contract, self.table, local.year - 1, local.month),
+                              report.projection(month, min(now, known) if known else now)),
+                habits.advices(self._usage, self.contract, bool(self.level and self.level.sun))),
             "a_savoir": self._know(today, yesterday, month, rise, price, self._unusual(home, local), panels, bool(to_mend)),
             "mis_a_jour": now.isoformat(),
         }
@@ -890,6 +892,14 @@ def _number(state) -> float | None:
 
 def _positive(value: float | None) -> float | None:
     return None if value is None else max(0.0, value)
+
+
+def _with_devices(found: list[dict], devices: list[dict]) -> list[dict]:
+    """The water heater and the machines (maquette D) among the other advices, the most euros first, as
+    daily.advices ranks them: the unusual day (news) stays first."""
+    news = [a for a in found if a["id"] == "jour_inhabituel"]
+    rest = [a for a in found if a["id"] != "jour_inhabituel"] + devices
+    return news + sorted(rest, key=lambda a: -(a.get("euros_an") or 0))
 
 
 def _level(level: sources.Level | None) -> dict:

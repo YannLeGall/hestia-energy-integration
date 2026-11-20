@@ -55,6 +55,13 @@ PISTES = {
     "budget_mois": ("Ce mois coûte plus que d'habitude",
                     "Au rythme actuel, environ {euros} € : {ecart} € de plus qu'en {mois} dernier.", None),
 }
+# « Pour économiser » as maquette D says it (Frank, 19 Nov. 2026): what is done today, then what would be better.
+BETTER = {
+    "veille_haute": ("Quand tout dort, la maison consomme encore {w} W, jour et nuit : {euros} € par an.",
+                     "Faites le tour avec les prises : box, écrans en veille, appareils oubliés. Coupez ce qui ne sert pas la nuit."),
+    "chauffage_degre": ("Le chauffage fait environ {part} % de vos achats d'électricité.",
+                        "Baissez la consigne d'un degré dans les pièces chauffées."),
+}
 # The tile's chip (PHRASES.md § 4): « Rien à faire », « À revoir », « Bon moment », « Demain rouge », « Urgent ».
 CHIP = {URGENT: "Urgent", GESTE: "À revoir", BENEFICE: "Bon moment", RIEN: "Rien à faire"}
 
