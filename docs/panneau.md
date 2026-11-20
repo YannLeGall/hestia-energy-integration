@@ -2,12 +2,12 @@
 
 Tout se règle dans le panneau **Hestia-FB** de la barre latérale, onglet **Énergie**. Pas de YAML, pas de nom d’entité à connaître.
 
-- **Vue d’ensemble** : ce que fait Énergie, avec un exemple tiré de votre maison ; ce qui reste à régler et sa cause probable ; trois chiffres (depuis le 1er, prévu ce mois-ci, part du soleil) ; ce qui ferait économiser ; les derniers bilans.
+- **Vue d’ensemble** : si tout fonctionne. Trois chiffres (les sources à jour, les entités qui ont une valeur, les jours d’historique lus), ce qui reste à régler, chaque source et quand elle a donné des nouvelles pour la dernière fois, ce qu’Énergie peut calculer avec votre équipement (et ce qu’il faudrait en plus), ce qu’Hestia a corrigé, et le dernier calcul.
 - **Sources** : une ligne par chose mesurée (électricité achetée, revendue, soleil, poêle, eau), d’où elle vient, comparée à Enedis, et ce qu’Hestia a corrigé.
 - **Appareils** : les appareils de la page Énergie, rangés par usage (modifiable), avec les euros du mois dernier. Cette page n’apparaît que si vous en avez.
 - **Réglages** : le contrat, les prix, l’eau, les granulés, les notifications. Chaque valeur est pré-remplie, avec **Rétablir**.
 - **Extensions** : une ligne et un interrupteur par extension.
-- **Bilan** : les 12 derniers mois en euros, le soleil et la revente, le chauffage et l’eau.
+- **Bilan** : les euros depuis le 1er, la prévision du mois, les derniers bilans, puis les 12 derniers mois en euros, le soleil et la revente, le chauffage et l’eau.
 - **À propos** : les versions, la date des tarifs, les liens.
 
 ## Les notifications

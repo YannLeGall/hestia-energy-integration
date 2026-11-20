@@ -76,9 +76,10 @@ Enedis fait foi : quand HA Linky ou MyElectricalData est là, les bilans sont ca
 
 Tout se règle dans le panneau **Hestia-FB** de la barre latérale, onglet **Énergie**. Pas de YAML, pas de nom d’entité à connaître. Chaque valeur est déjà remplie avec ce que Home Assistant connaît, et dit d’où elle vient : vous vérifiez, vous corrigez si besoin, **Rétablir** remet la valeur trouvée.
 
-- **Vue d’ensemble** : ce qui reste à régler, trois chiffres, ce qui ferait économiser, les derniers bilans.
+- **Vue d’ensemble** : si tout fonctionne. Ce qui reste à régler, chaque source et quand elle a donné des nouvelles, ce qu’Énergie peut calculer avec votre équipement.
 - **Sources** : chaque chose mesurée, d’où elle vient, comparée à Enedis.
-- **Appareils**, **Bilan**, **Extensions**, **À propos**.
+- **Bilan** : les euros du mois, les derniers bilans, les 12 derniers mois.
+- **Appareils**, **Extensions**, **À propos**.
 - **Réglages** : le contrat (Base, heures creuses ou Tempo), les plages d’heures creuses, la puissance, les prix, l’eau, les granulés, les notifications.
 
 Les tarifs réglementés d’EDF (Tarif Bleu) sont dans l’intégration, depuis 2012 : chaque jour passé est compté au prix de son époque. Une autre offre ? Recopiez les prix de votre facture. Un prix inconnu reste inconnu : Énergie n’invente jamais un euro. [L’onglet Énergie en détail](docs/panneau.md) · [Le contrat et les prix](docs/contrat.md).

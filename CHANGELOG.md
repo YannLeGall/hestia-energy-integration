@@ -1,5 +1,10 @@
 ## À venir
 
+### Améliorations
+
+- La vue d’ensemble du panneau devient technique : elle dit si tout fonctionne. Trois chiffres (les sources à jour, les entités qui ont une valeur, les jours d’historique lus), chaque source avec l’heure de ses dernières nouvelles (« il y a 8 s », « en retard »), ce qu’Énergie peut calculer avec votre équipement, ce qu’Hestia a corrigé, et l’heure du dernier calcul. Une source qui se tait depuis plusieurs heures passe dans « À régler ».
+- Les euros du mois et les derniers bilans passent dans la page Bilan. Les conseils pour économiser restent sur la carte.
+
 ### Documentation
 
 - Une vraie documentation pour la première version stable, sur le modèle de Hestia Weather : un bandeau en haut de la page, une icône qui s’affiche dans le Marketplace, HACS et la page des intégrations, et des pages pour chaque sujet (installation pas à pas, la carte, l’onglet Énergie, le contrat, les extensions, les entités).
