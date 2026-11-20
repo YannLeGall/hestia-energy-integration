@@ -243,7 +243,7 @@ class HestiaEnergyCard extends LitElement {
     <div class="nw-band-text"><p class="nw-band-kicker">En ce moment</p><p class="nw-band-title">${b.titre}</p>${b.pourquoi||this._periodSay(v)?html`<p class="nw-band-line">${b.pourquoi||this._periodSay(v)}</p>`:nothing}</div></div></div>`:nothing)}
    <div class="periods${secs.length===2?' two':''}">${secs}</div>
    ${v.usage?this._section('usage','Votre contrat, bien utilisé','sur 12 mois',this._usage(v)):nothing}
-   ${v.pistes?.length?this._section('save','Pour économiser','sur 12 mois, en euros',html`<div class="pistes better">${v.pistes.slice(0,6).map(p=>p.maintenant?this._better(p):this._piste(p))}</div>`):nothing}
+   ${v.pistes?.length?this._section('save','Pour économiser','sur 12 mois, en euros',html`${v.pistes.slice(0,6).some(p=>p.profil||p.mieux_heures)?html`<div class="hrs-key"><span>Sur les frises, quand l'appareil tourne :</span><span style="--h:var(--nw-peak)"><i></i>heures pleines</span><span style="--h:var(--nw-cold)"><i></i>heures creuses</span><span style="--h:var(--nw-sun)"><i></i>au soleil</span></div>`:nothing}<div class="pistes better">${v.pistes.slice(0,6).map(p=>p.maintenant?this._better(p):this._piste(p))}</div>`):nothing}
    ${this._section('more','En détail','touchez pour ouvrir',html`<div class="more">${this._goes(v)}</div>`)}
   </ha-card>`;
  }
@@ -380,13 +380,9 @@ class HestiaEnergyCard extends LitElement {
    return this._section('now','En ce moment',this._when(d),html`<div class="lines"><div class="line"><span class="ico" style="--c:var(--nw-grid)">${icon('clock')}</span>
     <span>Le kWh coûte <b>${price(d.prix)} €</b>${this._when(d)?` ${this._when(d)}`:''}${next}.</span></div></div>`);
   }
-  const heat=d.chauffage,running=[...d.en_marche].sort((a,b)=>b.w-a.w);
-  const chips=[...(heat?.poele?[html`<span class="chip">Poêle <b>allumé</b></span>`]:[]),
-   ...(heat?.pieces??[]).map(r=>html`<span class="chip">Chauffage ${r.nom}${r.w!=null?html` <b>${kw(r.w)} kW</b>`:nothing}</span>`),
-   ...running.slice(0,5).map(r=>html`<span class="chip">${r.nom} <b>${kw(r.w)} kW</b></span>`)];
+  // No « En marche » chips here: the Appareils card says what runs (Frank, 20 Nov. 2026).
   return this._section('now','En ce moment',`${kw(d.maison_w)} kW pour toute la maison`,html`${this._flow(v)}
-   <div class="lines"><div class="line"><span class="ico" style="--c:var(--nw-home)">${icon('home')}</span><span>${this._nowSay(v,true)}</span></div>
-    ${chips.length?html`<div class="chips"><span class="nw-label">En marche</span>${chips}</div>`:nothing}</div>`);
+   <div class="lines"><div class="line"><span class="ico" style="--c:var(--nw-home)">${icon('home')}</span><span>${this._nowSay(v,true)}</span></div></div>`);
  }
  private _todaySection(v:View){
   const s=v.jusqu_ici;
@@ -516,18 +512,22 @@ class HestiaEnergyCard extends LitElement {
    ${shown!=null?html`<span class="pe"><b>${num(shown,0)} €</b><small>${fr(p.sous??p.unite??'par an')}</small></span>`:nothing}`;
   return key?html`<button class="piste wide" style="--c:var(${c})" @click=${()=>{this._open=key;}}>${body}</button>`:html`<div class="piste wide" style="--c:var(${c})">${body}</div>`;
  }
- /** The hours a device runs now: each hour coloured by what paid most of it (sun, off-peak, peak), as strong as its share. */
+ /** The hours a device runs now: only the hours it really runs (a quarter of its busiest hour or more), each in the colour
+     of what paid most of it. One flat colour per price, no shades: Frank could not read the 24 shaded squares (20 Nov.). */
  private _hoursNow(profil:[number,number,number][]){
-  const top=Math.max(...profil.map(h=>h[0]+h[1]+h[2]),1e-9),col=['--nw-sun','--nw-cold','--nw-home'];
-  return this._hours(profil.map(h=>{const t=h[0]+h[1]+h[2];if(t<top*.08)return null;const i=h.indexOf(Math.max(...h));return [col[i],Math.max(.35,t/top)] as [string,number];}));
+  const top=Math.max(...profil.map(h=>h[0]+h[1]+h[2]),1e-9),col=['--nw-sun','--nw-cold','--nw-peak'];
+  return this._hours(profil.map(h=>{const t=h[0]+h[1]+h[2];return t<top*.25?null:col[h.indexOf(Math.max(...h))];}));
  }
  private _hoursBetter(spans:[number,number,string][]){
-  const cells:([string,number]|null)[]=Array(24).fill(null);
-  for(const [a,b,what] of spans)for(let h=a;h<b;h++)cells[h%24]=[what==='soleil'?'--nw-sun':'--nw-cold',1];
+  const cells:(string|null)[]=Array(24).fill(null);
+  for(const [a,b,what] of spans)for(let h=a;h<b;h++)cells[h%24]=what==='soleil'?'--nw-sun':'--nw-cold';
   return this._hours(cells);
  }
- private _hours(cells:([string,number]|null)[]){
-  return html`<span class="hrs" aria-hidden="true"><span class="hrs-b">${cells.map(x=>x?html`<i style="--h:var(${x[0]});opacity:${x[1].toFixed(2)}"></i>`:html`<i></i>`)}</span>
+ /** A 24-hour line with the running hours drawn as blocks (neighbour hours of the same colour joined), and ticks every 6 h. */
+ private _hours(cells:(string|null)[]){
+  const blocks:[number,number,string][]=[];
+  cells.forEach((c,h)=>{if(!c)return;const last=blocks[blocks.length-1];if(last&&last[1]===h&&last[2]===c)last[1]=h+1;else blocks.push([h,h+1,c]);});
+  return html`<span class="hrs" aria-hidden="true"><span class="hrs-b">${[6,12,18].map(h=>html`<em style="left:${h/24*100}%"></em>`)}${blocks.map(([a,b,c])=>html`<i style="--h:var(${c});left:${(a/24*100).toFixed(3)}%;width:${((b-a)/24*100).toFixed(3)}%"></i>`)}</span>
    <span class="hrs-x"><span>0 h</span><span>6 h</span><span>12 h</span><span>18 h</span><span>24 h</span></span></span>`;
  }
  private _piste(p:Piste){
