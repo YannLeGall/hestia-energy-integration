@@ -1,3 +1,9 @@
+## À venir
+
+### Documentation
+
+- Une vraie documentation pour la première version stable, sur le modèle de Hestia Weather : un bandeau en haut de la page, une icône qui s’affiche dans le Marketplace, HACS et la page des intégrations, et des pages pour chaque sujet (installation pas à pas, la carte, l’onglet Énergie, le contrat, les extensions, les entités).
+
 ## 1.0.0b5 — Une frise par appareil
 
 ### Améliorations
