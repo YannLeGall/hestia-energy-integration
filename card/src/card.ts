@@ -56,9 +56,11 @@ type Config={type:string;card?:string;name?:string};
 const RUBRICS=['soleil','chauffage','veille','eau','appareils','pointe','contrat'] as const;
 /** Advice « à froid » (maquette des cartes 3): a gesture, why, and the euros at stake a year or a winter. */
 type Piste={id:string;titre:string;pourquoi:string;euros_an:number|null;unite:string|null;rubrique:string|null;
- nom?:string;maintenant?:string;mieux?:string;gain?:number;sous?:string;profil?:[number,number,number][];mieux_heures?:[number,number,string][]};
+ nom?:string;maintenant?:string;mieux?:string;gain?:number;sous?:string;profil?:[number,number,number][];mieux_heures?:[number,number,string][];depart?:number|null;lancer?:number|null};
 /** What a coloured block of a strip means, said under it. */
-const HOURS_SAY:Record<string,string>={'--nw-peak':'heures pleines','--nw-cold':'heures creuses','--nw-sun':'au soleil'};
+const HOURS_SAY:Record<string,string>={'--nw-peak':'en heures pleines','--nw-cold':'en heures creuses','--nw-sun':'les jours de soleil'};
+/** « 0 h 30 », « 19 h » from minutes after midnight, with no break inside. */
+const hm=(m:number)=>{const h=Math.floor(m/60)%24,mm=m%60;return mm?`${h}\u00a0h\u00a0${String(mm).padStart(2,'0')}`:`${h}\u00a0h`;};
 const PISTE_LOOK:Record<string,[string,string]>={veille_haute:['moon','--nw-watch'],chauffage_degre:['flame','--nw-heat'],contrat_base:['doc','--nw-ok'],
  jour_inhabituel:['home','--nw-home'],budget_mois:['doc','--nw-home'],chauffe_eau_heures:['drop','--nw-cold'],machine_heures:['clock','--nw-home']};
 type Rubric=typeof RUBRICS[number];
@@ -508,32 +510,39 @@ class HestiaEnergyCard extends LitElement {
   const [ic,c]=PISTE_LOOK[p.id]??['home','--nw-home'],key=p.rubrique&&(RUBRICS as readonly string[]).includes(p.rubrique)?p.rubrique as Rubric:undefined;
   const shown=p.gain??p.euros_an;
   const body=html`<span class="ico" style="--c:var(${c})">${icon(ic)}</span><span class="bt">${p.nom??p.titre}</span>
-   <span class="bn"><small>Aujourd'hui</small>${fr(p.maintenant!)}${p.profil?this._hoursNow(p.profil):nothing}</span>
+   <span class="bn"><small>Aujourd'hui</small>${fr(p.maintenant!)}${p.profil?this._hoursNow(p.profil,p.depart):nothing}</span>
    <span class="ba" aria-hidden="true">→</span>
-   <span class="bm"><small>Mieux</small>${fr(p.mieux??'')}${p.mieux_heures?this._hoursBetter(p.mieux_heures):nothing}</span>
+   <span class="bm"><small>Mieux</small>${fr(p.mieux??'')}${p.mieux_heures?this._hoursBetter(p.mieux_heures,p.lancer):nothing}</span>
    ${shown!=null?html`<span class="pe"><b>${num(shown,0)} €</b><small>${fr(p.sous??p.unite??'par an')}</small></span>`:nothing}`;
   return key?html`<button class="piste wide" style="--c:var(${c})" @click=${()=>{this._open=key;}}>${body}</button>`:html`<div class="piste wide" style="--c:var(${c})">${body}</div>`;
  }
- /** The hours a device runs now: only the hours it really runs (a quarter of its busiest hour or more), each in the colour
-     of what paid most of it. One flat colour per price, no shades: Frank could not read the 24 shaded squares (20 Nov.). */
- private _hoursNow(profil:[number,number,number][]){
+ /** The hours a device runs now (a quarter of its busiest hour or more), each in the colour of what paid most of it, with
+     a pin at the hour it starts most often. */
+ private _hoursNow(profil:[number,number,number][],start?:number|null){
   const top=Math.max(...profil.map(h=>h[0]+h[1]+h[2]),1e-9),col=['--nw-sun','--nw-cold','--nw-peak'];
-  return this._hours(profil.map(h=>{const t=h[0]+h[1]+h[2];return t<top*.25?null:col[h.indexOf(Math.max(...h))];}),'Il tourne');
+  const cells=profil.map(h=>{const t=h[0]+h[1]+h[2];return t<top*.25?null:col[h.indexOf(Math.max(...h))];});
+  return this._hours(cells,start,start!=null?html`Il démarre le plus souvent à <b>${hm(start)}</b>.`:nothing,
+   (a,b,c)=>html`de ${hm(a*60)} à ${hm(b*60)}, ${HOURS_SAY[c]}`);
  }
- private _hoursBetter(spans:[number,number,string][]){
+ /** When to run it: a pin at the hour to start it, and the hours it would then run (night, or the sun's window). */
+ private _hoursBetter(spans:[number,number,string][],start?:number|null){
   const cells:(string|null)[]=Array(24).fill(null);
   for(const [a,b,what] of spans)for(let h=a;h<b;h++)cells[h%24]=what==='soleil'?'--nw-sun':'--nw-cold';
-  return this._hours(cells,'À lancer');
+  return this._hours(cells,start,start!=null?html`Lancez-le à <b>${hm(start)}</b>${spans.some(x=>x[2]==='soleil')?' ou au soleil':''}.`:nothing,
+   (a,b,c)=>c==='--nw-sun'?html`ou entre ${hm(a*60)} et ${hm(b*60)}, ${HOURS_SAY[c]}`:html`de ${hm(start??a*60)} à ${hm(b*60)}, ${HOURS_SAY[c]}`);
  }
- /** A 24-hour line with the running hours drawn as blocks (neighbour hours of the same colour joined), ticks every 6 h,
-     and under it, in words, what each block is: its hours and its price (Frank, 20 Nov.: « pourquoi un trait, pourquoi
-     cette couleur ? »). */
- private _hours(cells:(string|null)[],lead:string){
+ /** A 24-hour line: the running hours as blocks (neighbour hours of the same colour joined), ticks every 6 h, a pin with
+     its clock time at the start hour, and under it, in words, the start and what each block is (Frank, 20 Nov.:
+     « pourquoi un trait, pourquoi cette couleur ? », then « quand il tourne, à quelle heure le faire tourner ? »). */
+ private _hours(cells:(string|null)[],pin:number|null|undefined,lead:unknown,say:(a:number,b:number,c:string)=>unknown){
   const blocks:[number,number,string][]=[];
   cells.forEach((c,h)=>{if(!c)return;const last=blocks[blocks.length-1];if(last&&last[1]===h&&last[2]===c)last[1]=h+1;else blocks.push([h,h+1,c]);});
-  return html`<span class="hrs" aria-hidden="true"><span class="hrs-b">${[6,12,18].map(h=>html`<em style="left:${h/24*100}%"></em>`)}${blocks.map(([a,b,c])=>html`<i style="--h:var(${c});left:${(a/24*100).toFixed(3)}%;width:${((b-a)/24*100).toFixed(3)}%"></i>`)}</span>
+  const at=pin!=null?pin/1440*100:null,side=at==null?'':at<8?'l':at>92?'r':'';
+  return html`<span class="hrs${at!=null?' pinned':''}" aria-hidden="true">
+   ${at!=null?html`<span class="hrs-pin ${side}" style="left:${at.toFixed(3)}%"><b>${hm(pin!)}</b></span>`:nothing}
+   <span class="hrs-b">${[6,12,18].map(h=>html`<em style="left:${h/24*100}%"></em>`)}${blocks.map(([a,b,c])=>html`<i style="--h:var(${c});left:${(a/24*100).toFixed(3)}%;width:${((b-a)/24*100).toFixed(3)}%"></i>`)}${at!=null?html`<u style="left:${at.toFixed(3)}%"></u>`:nothing}</span>
    <span class="hrs-x"><span>0 h</span><span>6 h</span><span>12 h</span><span>18 h</span><span>24 h</span></span>
-   ${blocks.length?html`<span class="hrs-say">${lead}\u00a0:${blocks.map(([a,b,c])=>html`<span style="--h:var(${c})"><i></i>${a}\u00a0h\u00a0–\u00a0${b}\u00a0h, ${HOURS_SAY[c]??''}</span>`)}</span>`:nothing}</span>`;
+   <span class="hrs-say">${lead!==nothing?html`<span class="lead">${lead}</span>`:nothing}${blocks.map(([a,b,c])=>html`<span style="--h:var(${c})"><i></i>${say(a,b,c)}</span>`)}</span></span>`;
  }
  private _piste(p:Piste){
   const [ic,c]=PISTE_LOOK[p.id]??['home','--nw-home'],key=p.rubrique&&(RUBRICS as readonly string[]).includes(p.rubrique)?p.rubrique as Rubric:undefined;

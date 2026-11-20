@@ -101,6 +101,7 @@ class Advices(unittest.TestCase):
         self.assertIn("D'octobre à novembre, programmez-le à 0 h 30. Remettez 11 h en décembre", a["mieux"])
         self.assertEqual(a["euros_an"], round(heater["euros_sans_soleil"]))
         self.assertEqual(a["mieux_heures"], [[0, 1, "hc"]])
+        self.assertEqual((a["depart"], a["lancer"]), (11 * 60, 30))  # the pins of the card's strips
 
     def test_a_machine_at_the_dear_hour(self):
         a = self.advices["machine_heures"]
@@ -108,6 +109,7 @@ class Advices(unittest.TestCase):
         self.assertEqual(a["maintenant"], "Il tourne surtout vers 20 h : tous les lavages au prix fort.")
         self.assertEqual(a["mieux"], "Les jours de soleil, lancez-le entre 12 h et 14 h. Sinon, départ différé à 0 h 30.")
         self.assertTrue(a["sous"].startswith("par an, ") and a["sous"].endswith(" par lavage"))
+        self.assertEqual((a["depart"], a["lancer"]), (20 * 60, 30))
 
     def test_without_panels_the_night_only(self):
         a = {x["id"]: x for x in habits.advices(self.found, self.contract, sun=False)}["machine_heures"]
