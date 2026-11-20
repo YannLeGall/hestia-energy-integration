@@ -1,4 +1,4 @@
-## À venir
+## 1.0.0b3 — Pour économiser, en trois temps
 
 ### Améliorations
 
