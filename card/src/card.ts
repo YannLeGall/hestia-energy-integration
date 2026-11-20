@@ -345,13 +345,13 @@ class HestiaEnergyCard extends LitElement {
  }
  /** « En ce moment » as Frank's template draws it (20 Nov. 2026): a halo of colour behind each side, yellow-orange for
      the production, red in peak hours and blue in off-peak hours for the grid and the home; on each line, bubbles that
-     grow as they reach its middle, quicker as the power grows; the water of the day under the home. */
+     grow as they reach its middle, quicker as the power grows; the water of the day in one small line under the home. */
  private _flow(v:View){
   const d=v.direct!,cheap=(d.periode??'').includes('hc'),tone=cheap?'--nw-cold':'--nw-level3';
   const sun=v.equipement.soleil?Math.max(0,d.soleil_w??0):null,home=Math.max(0,d.maison_w??0);
   const buying=(d.achat_w??0)>=30,selling=!buying&&(d.revente_w??0)>=30,direct=sun==null?0:Math.min(sun,home);
   const watt=(w:number)=>w<1000?`${num(w,0)} W`:`${num(w/1000,2)} kW`;
-  const node=(ic:string,c:string,val:string,l:string,dim=false)=>html`<div class="fnode${dim?' dim':''}" style="--c:var(${c})"><span class="fdot">${icon(ic)}</span><span class="fl">${l}</span><span class="fv">${val}</span></div>`;
+  const node=(ic:string,c:string,val:string,l:string,dim=false,more:unknown=nothing)=>html`<div class="fnode${dim?' dim':''}" style="--c:var(${c})"><span class="fdot">${icon(ic)}</span><span class="fl">${l}</span><span class="fv">${val}</span>${more}</div>`;
   // Faster with more power: 3.2 s for a trickle, 1.2 s from 3 kW.
   const link=(c:string,w:number,say:[string,string],back=false)=>{
    const on=w>=30,dur=on?Math.max(1.2,3.2-w/1500):0;
@@ -359,11 +359,12 @@ class HestiaEnergyCard extends LitElement {
   };
   const gridW=buying?d.achat_w!:selling?d.revente_w!:0;
   const gridSay:[string,string]=buying?[`↙ ${watt(gridW)}`,'achetés']:[`↗ ${watt(gridW)}`,'revendus'];
-  const water=v.eau&&v.eau.jour_l>0?html`<div class="fwater"><span class="fstem"></span>${node('drop','--nw-water',`${num(v.eau.jour_l,0)} L`,"Eau aujourd'hui")}</div>`:nothing;
+  // The water of the day: one small line under the home, never a node that makes the tile taller (Frank, 20 Nov.).
+  const water=v.eau&&v.eau.jour_l>0?html`<span class="fw">${icon('drop')}${num(v.eau.jour_l,0)} L d'eau aujourd'hui</span>`:nothing;
   const halo=`--sunA:${sun==null?0:Math.min(1,sun/1500).toFixed(2)};--gridA:${buying||selling?Math.min(1,.35+gridW/2000).toFixed(2):'.25'};--tone:var(${tone})`;
   return html`<div class="flow2${sun==null?' two':''}" style=${halo}>
    ${sun!=null?html`${node('sun','--nw-prod',watt(sun),'Production',sun<30)}${link('--nw-prod',direct,[watt(direct),'en direct'])}`:nothing}
-   <div class="fmid">${node('home',tone,watt(home),'Maison')}${water}</div>
+   ${node('home',tone,watt(home),'Maison',false,water)}
    ${link(tone,gridW,gridSay,buying)}
    ${node('grid',tone,`${selling?'+':''}${watt(gridW)}`,'Réseau',!buying&&!selling)}
   </div>`;
