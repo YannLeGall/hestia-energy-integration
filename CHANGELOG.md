@@ -1,4 +1,4 @@
-## À venir
+## 1.0.0b6 — Une vue d’ensemble technique, et la documentation
 
 ### Améliorations
 
