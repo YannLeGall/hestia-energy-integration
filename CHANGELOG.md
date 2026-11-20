@@ -1,3 +1,10 @@
+## 1.0.0b7 — Une nouvelle page d’accueil Hestia-FB
+
+### Améliorations
+
+- La page d’accueil du panneau Hestia-FB est refaite. Chaque brique installée (Météo, Confort, Énergie) y a sa porte : sa couleur, son icône, son chiffre clé (par exemple « 75 € depuis le 1er novembre »), son état et sa version. Un clic sur la porte ouvre la brique. Un petit schéma montre les briques reliées entre elles.
+- Les autres briques n’ont rien à changer : elles s’affichent dans ce nouvel accueil telles quelles.
+
 ## 1.0.0b6 — Une vue d’ensemble technique, et la documentation
 
 ### Améliorations
