@@ -1,3 +1,10 @@
+## À venir
+
+### Améliorations
+
+- « Pour économiser » : une seule frise par appareil, à la manière de la frise des événements de Weather. La journée y est dessinée avec ses prix (heures creuses, soleil, heures pleines), l'icône de l'appareil marque ses départs habituels avec leur heure, et une pastille verte marque l'heure à viser. Sous la frise, une ligne dit sur quelle durée sont comptés les départs (les 2 derniers mois).
+- « Aujourd'hui » devient « D'habitude » pour le chauffe-eau et les machines : ce sont des habitudes, pas la journée en cours.
+
 ## 1.0.0b4 — Des frises qui disent l'heure
 
 ### Améliorations

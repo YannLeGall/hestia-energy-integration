@@ -56,12 +56,15 @@ type Config={type:string;card?:string;name?:string};
 const RUBRICS=['soleil','chauffage','veille','eau','appareils','pointe','contrat'] as const;
 /** Advice « à froid » (maquette des cartes 3): a gesture, why, and the euros at stake a year or a winter. */
 type Piste={id:string;titre:string;pourquoi:string;euros_an:number|null;unite:string|null;rubrique:string|null;
- nom?:string;maintenant?:string;mieux?:string;gain?:number;sous?:string;profil?:[number,number,number][];mieux_heures?:[number,number,string][];depart?:number|null;lancer?:number|null};
+ nom?:string;maintenant?:string;mieux?:string;gain?:number;sous?:string;profil?:[number,number,number][];mieux_heures?:[number,number,string][];zones?:[number,number,string][];departs?:[number,number][];jours?:number;lancer?:number|null};
 /** What a coloured block of a strip means, said under it. */
-const HOURS_SAY:Record<string,string>={'--nw-peak':'en heures pleines','--nw-cold':'en heures creuses','--nw-sun':'les jours de soleil'};
+/** The strip's segments: the day's prices (hc, hp, soleil), their colour, pictogram and word. */
+const ZONE:Record<string,[string,string|null,string]>={hc:['--nw-cold','moon','creuses'],hp:['--nw-peak',null,'pleines'],soleil:['--nw-sun','sun','soleil']};
+/** The device a strip speaks of, by its name: its pictogram on the pins. */
+const deviceIcon=(p:Piste)=>p.id==='chauffe_eau_heures'?'heater':/vaisselle/i.test(p.nom??'')?'dish':/s[eè]che/i.test(p.nom??'')?'dryer':/linge|laver/i.test(p.nom??'')?'washer':'plug';
 /** « 0 h 30 », « 19 h » from minutes after midnight, with no break inside. */
 const hm=(m:number)=>{const h=Math.floor(m/60)%24,mm=m%60;return mm?`${h}\u00a0h\u00a0${String(mm).padStart(2,'0')}`:`${h}\u00a0h`;};
-const PISTE_LOOK:Record<string,[string,string]>={veille_haute:['moon','--nw-watch'],chauffage_degre:['flame','--nw-heat'],contrat_base:['doc','--nw-ok'],
+const PISTE_LOOK:Record<string,[string,string]>={veille_haute:['moon','--nw-watch'],chauffage_degre:['flame','--nw-heat'],contrat_base:['doc','--nw-benefit'],
  jour_inhabituel:['home','--nw-home'],budget_mois:['doc','--nw-home'],chauffe_eau_heures:['drop','--nw-cold'],machine_heures:['clock','--nw-home']};
 type Rubric=typeof RUBRICS[number];
 
@@ -77,6 +80,11 @@ const I:Record<string,string>={
  plug:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 3v5M15 3v5M6.5 8h11v3.5a5.5 5.5 0 0 1-11 0z"/><path d="M12 17v4"/></svg>',
  doc:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M6 3h8.5L19 7.5V21H6z"/><path d="M14 3v5h5M9 12.5h7M9 16.5h7"/></svg>',
  flame:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M12 21.5a6.5 6.5 0 0 0 6.5-6.5c0-4.5-4-6.5-4.5-11-2.5 2-4 4.5-4 7-1-.5-2-1.8-2.2-3C6.5 9.8 5.5 12.3 5.5 15a6.5 6.5 0 0 0 6.5 6.5z"/></svg>',
+ washer:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4.5" y="3" width="15" height="18" rx="2.5"/><circle cx="12" cy="13.5" r="4.3"/><path d="M8 6.5h1.5M13 6.5h3"/></svg>',
+ dryer:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4.5" y="3" width="15" height="18" rx="2.5"/><circle cx="12" cy="13.5" r="4.3"/><path d="M8 6.5h1.5M10 13.8c.7-.8 1.3-.8 2 0s1.3.8 2 0"/></svg>',
+ dish:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4.5" y="3" width="15" height="18" rx="2.5"/><path d="M4.5 8h15M8 5.5h1.5"/><path d="M8.5 17.5a3.5 3.5 0 0 1 7 0M12 14v-1.5"/></svg>',
+ heater:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="6.5" y="2.5" width="11" height="16" rx="5.5"/><path d="M9.5 18.5v3M14.5 18.5v3M12 7.5c-1.4 1.8-2 2.8-2 3.8a2 2 0 0 0 4 0c0-1-.6-2-2-3.8z"/></svg>',
+ check:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12.5 4.5 4.5L19 7.5"/></svg>',
  chev:'<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>',
 };
 const icon=(k:string)=>unsafeHTML(I[k]??I.bolt);
@@ -105,7 +113,7 @@ const toHub=(e:MouseEvent)=>{e.preventDefault();history.pushState(null,'',(e.cur
 const MONTHS=['janvier','février','mars','avril','mai','juin','juillet','août','septembre','octobre','novembre','décembre'];
 const SHORT=['janv.','févr.','mars','avr.','mai','juin','juil.','août','sept.','oct.','nov.','déc.'];
 const LEVEL:Record<string,string>={bleu:'ok',vert:'benefit',orange:'action',rouge:'urgent'};
-const TONE:Record<string,string>={bleu:'--nw-ok',vert:'--nw-benefit',orange:'--nw-act',rouge:'--nw-alert'};
+const TONE:Record<string,string>={bleu:'--nw-benefit',vert:'--nw-benefit',orange:'--nw-act',rouge:'--nw-alert'};
 const BANNER_ICON:Record<string,string>={fuite_eau:'drop',disjoncteur:'bolt',chauffe_eau_reseau:'drop',soleil_en_trop:'sun',soleil_machine_ok:'sun',
  soleil_chaleur:'sun',machines_ensemble:'plug',machine_sans_soleil:'sun',machine_heures_pleines:'clock',oublie:'plug',rien_hc:'clock',rien_hc_bientot:'clock',
  rien_soleil_juste:'sun',rien_soleil_petit:'sun',rien_soleil_plus_tard:'sun',rien:'home'};
@@ -221,7 +229,7 @@ class HestiaEnergyCard extends LitElement {
 
  /* ── 1 · The tile ── */
  private _tile(v:View){
-  const b=v.direct?.bandeau,c=b?TONE[b.couleur]??'--nw-ok':'--nw-ok',live=this._live(v);
+  const b=v.direct?.bandeau,c=b?TONE[b.couleur]??'--nw-benefit':'--nw-benefit',live=this._live(v);
   const pill:[string,string]|undefined=b?[b.pastille,c]:undefined,head={ic:'home',c:'--nw-home',subject:'Énergie',pill,over:false};
   // Nothing to do now: the tile gives the advice « à froid » worth the most (maquette des cartes 3).
   const best=(v.pistes??[]).find(p=>p.euros_an!=null);
@@ -441,9 +449,9 @@ class HestiaEnergyCard extends LitElement {
   if(p)out.push(this._go('pointe','bolt','--nw-grid','Pointe · aujourd\'hui',kw(p.kw*1000),'kW au plus fort',
    v.contrat?.kva?`Sur ${v.contrat.kva} kVA : ${p.part!=null&&p.part>=.7?'près de la limite':'de la marge'}.`:'L\'heure la plus chargée.'));
   const c=v.contrat;
-  if(c?.option==='hphc'&&c.part_hc!=null)out.push(this._go('contrat','doc','--nw-ok','Contrat · ce mois-ci',String(Math.round(c.part_hc*100)),
+  if(c?.option==='hphc'&&c.part_hc!=null)out.push(this._go('contrat','doc','--nw-benefit','Contrat · ce mois-ci',String(Math.round(c.part_hc*100)),
    atNight(offpeak(v.heures_creuses))?'% la nuit':'% en heures creuses','de vos achats en heures creuses.'));
-  else if(c)out.push(this._go('contrat','doc','--nw-ok','Contrat · ce mois-ci',c.option==='tempo'?'Tempo':c.option==='hphc'?'HP / HC':'Base',c.kva?` · ${c.kva} kVA`:'',
+  else if(c)out.push(this._go('contrat','doc','--nw-benefit','Contrat · ce mois-ci',c.option==='tempo'?'Tempo':c.option==='hphc'?'HP / HC':'Base',c.kva?` · ${c.kva} kVA`:'',
    c.option==='base'&&c.prix_base!=null?`${price(c.prix_base)} € le kWh à toute heure.`:'Vos prix et vos heures.'));
   return out;
  }
@@ -507,42 +515,40 @@ class HestiaEnergyCard extends LitElement {
  private _better(p:Piste){
   // French spacing: no line break before « : », « % », « € », nor inside « 0 h 30 » or « 190 W ».
   const fr=(t:string)=>t.replace(/ ([:;!?%€])/g,'\u00a0$1').replace(/(\d) (?=(W|kWh|h|centimes)(\s|$|[ .,:]))/g,'$1\u00a0').replace(/ h (\d)/g,'\u00a0h\u00a0$1');
-  const [ic,c]=PISTE_LOOK[p.id]??['home','--nw-home'],key=p.rubrique&&(RUBRICS as readonly string[]).includes(p.rubrique)?p.rubrique as Rubric:undefined;
+  const [ic0,c]=PISTE_LOOK[p.id]??['home','--nw-home'],ic=p.zones?deviceIcon(p):ic0,key=p.rubrique&&(RUBRICS as readonly string[]).includes(p.rubrique)?p.rubrique as Rubric:undefined;
   const shown=p.gain??p.euros_an;
   const body=html`<span class="ico" style="--c:var(${c})">${icon(ic)}</span><span class="bt">${p.nom??p.titre}</span>
-   <span class="bn"><small>Aujourd'hui</small>${fr(p.maintenant!)}${p.profil?this._hoursNow(p.profil,p.depart):nothing}</span>
+   <span class="bn"><small>${p.zones?"D'habitude":"Aujourd'hui"}</small>${fr(p.maintenant!)}</span>
    <span class="ba" aria-hidden="true">→</span>
-   <span class="bm"><small>Mieux</small>${fr(p.mieux??'')}${p.mieux_heures?this._hoursBetter(p.mieux_heures,p.lancer):nothing}</span>
-   ${shown!=null?html`<span class="pe"><b>${num(shown,0)} €</b><small>${fr(p.sous??p.unite??'par an')}</small></span>`:nothing}`;
+   <span class="bm"><small>Mieux</small>${fr(p.mieux??'')}</span>
+   ${shown!=null?html`<span class="pe"><b>${num(shown,0)} €</b><small>${fr(p.sous??p.unite??'par an')}</small></span>`:nothing}
+   ${p.zones?this._frise(p):nothing}`;
   return key?html`<button class="piste wide" style="--c:var(${c})" @click=${()=>{this._open=key;}}>${body}</button>`:html`<div class="piste wide" style="--c:var(${c})">${body}</div>`;
  }
- /** The hours a device runs now (a quarter of its busiest hour or more), each in the colour of what paid most of it, with
-     a pin at the hour it starts most often. */
- private _hoursNow(profil:[number,number,number][],start?:number|null){
-  const top=Math.max(...profil.map(h=>h[0]+h[1]+h[2]),1e-9),col=['--nw-sun','--nw-cold','--nw-peak'];
-  const cells=profil.map(h=>{const t=h[0]+h[1]+h[2];return t<top*.25?null:col[h.indexOf(Math.max(...h))];});
-  return this._hours(cells,start,start!=null?html`Il démarre le plus souvent à <b>${hm(start)}</b>.`:nothing,
-   (a,b,c)=>html`de ${hm(a*60)} à ${hm(b*60)}, ${HOURS_SAY[c]}`);
- }
- /** When to run it: a pin at the hour to start it, and the hours it would then run (night, or the sun's window). */
- private _hoursBetter(spans:[number,number,string][],start?:number|null){
-  const cells:(string|null)[]=Array(24).fill(null);
-  for(const [a,b,what] of spans)for(let h=a;h<b;h++)cells[h%24]=what==='soleil'?'--nw-sun':'--nw-cold';
-  return this._hours(cells,start,start!=null?html`Lancez-le à <b>${hm(start)}</b>${spans.some(x=>x[2]==='soleil')?' ou au soleil':''}.`:nothing,
-   (a,b,c)=>c==='--nw-sun'?html`ou entre ${hm(a*60)} et ${hm(b*60)}, ${HOURS_SAY[c]}`:html`de ${hm(start??a*60)} à ${hm(b*60)}, ${HOURS_SAY[c]}`);
- }
- /** A 24-hour line: the running hours as blocks (neighbour hours of the same colour joined), ticks every 6 h, a pin with
-     its clock time at the start hour, and under it, in words, the start and what each block is (Frank, 20 Nov.:
-     « pourquoi un trait, pourquoi cette couleur ? », then « quand il tourne, à quelle heure le faire tourner ? »). */
- private _hours(cells:(string|null)[],pin:number|null|undefined,lead:unknown,say:(a:number,b:number,c:string)=>unknown){
-  const blocks:[number,number,string][]=[];
-  cells.forEach((c,h)=>{if(!c)return;const last=blocks[blocks.length-1];if(last&&last[1]===h&&last[2]===c)last[1]=h+1;else blocks.push([h,h+1,c]);});
-  const at=pin!=null?pin/1440*100:null,side=at==null?'':at<8?'l':at>92?'r':'';
-  return html`<span class="hrs${at!=null?' pinned':''}" aria-hidden="true">
-   ${at!=null?html`<span class="hrs-pin ${side}" style="left:${at.toFixed(3)}%"><b>${hm(pin!)}</b></span>`:nothing}
-   <span class="hrs-b">${[6,12,18].map(h=>html`<em style="left:${h/24*100}%"></em>`)}${blocks.map(([a,b,c])=>html`<i style="--h:var(${c});left:${(a/24*100).toFixed(3)}%;width:${((b-a)/24*100).toFixed(3)}%"></i>`)}${at!=null?html`<u style="left:${at.toFixed(3)}%"></u>`:nothing}</span>
+ /** One strip for a device, after Weather's timeline of events (Frank, 20 Nov. 2026): the day's prices as segments
+     (off-peak, sun, peak), its usual starts as pins with its pictogram and their hour, the hour to start it as a green pin
+     (one green pin when a usual start is already there), and under it what the strip covers. */
+ private _frise(p:Piste){
+  const zones=p.zones!,at=(m:number)=>zones.find(z=>z[0]<=m%1440&&m%1440<z[1])?.[2]??'hp';
+  const best=p.lancer??null,dev=deviceIcon(p);
+  type Pin={m:number;tone:string;ic:string;good:boolean};
+  const pins:Pin[]=(p.departs??[]).map(([m])=>({m,tone:ZONE[at(m)][0],ic:dev,good:false}));
+  if(best!=null){
+   const near=pins.find(q=>Math.min(Math.abs(q.m-best),1440-Math.abs(q.m-best))<=90);
+   if(near){near.good=true;near.tone='--nw-benefit';}else pins.push({m:best,tone:'--nw-benefit',ic:'check',good:true});
+  }
+  pins.sort((u,v)=>u.m-v.m);
+  // Pins closer than four hours keep only their pictogram: the hour is in the sentence above (Weather does the same).
+  const tight=pins.some((q,i)=>i>0&&q.m-pins[i-1].m<240);
+  const x=(m:number)=>m/1440*100,edge=(m:number)=>x(m)<7?'l':x(m)>93?'r':'';
+  const span=p.jours&&p.jours<365?`les ${Math.round(p.jours/30)} derniers mois`:'les 12 derniers mois';
+  return html`<span class="fr${tight?' tight':''}" aria-hidden="true">
+   <span class="fr-pins">${pins.map(q=>html`<span class="fr-pin ${edge(q.m)}${q.good?' good':''}" style="left:${x(q.m).toFixed(2)}%;--tone:var(${q.tone})"><span class="chip">${q.good&&q.ic!=='check'?html`${icon('check')}${icon(q.ic)}`:icon(q.ic)}<span class="fr-h">${hm(q.m)}</span></span><span class="stem"></span></span>`)}</span>
+   <span class="fr-lane">${zones.map(([a,b,k])=>{const [tone,pic,word]=ZONE[k],h=(b-a)/60;
+     return html`<span class="fr-seg" style="flex:${b-a};--tone:var(${tone})">${pic&&h>=2?icon(pic):nothing}${h>=4?html`<span class="w">${word}</span>`:nothing}</span>`;})}</span>
    <span class="hrs-x"><span>0 h</span><span>6 h</span><span>12 h</span><span>18 h</span><span>24 h</span></span>
-   <span class="hrs-say">${lead!==nothing?html`<span class="lead">${lead}</span>`:nothing}${blocks.map(([a,b,c])=>html`<span style="--h:var(${c})"><i></i>${say(a,b,c)}</span>`)}</span></span>`;
+   <span class="fr-say">${p.departs?.length?html`<span><i>${icon(dev)}</i>ses départs habituels, sur ${span}</span>`:html`<span>il démarre à toute heure, sur ${span}</span>`}${best!=null?html`<span><i class="ok">${icon('check')}</i>l'heure à viser</span>`:nothing}</span>
+  </span>`;
  }
  private _piste(p:Piste){
   const [ic,c]=PISTE_LOOK[p.id]??['home','--nw-home'],key=p.rubrique&&(RUBRICS as readonly string[]).includes(p.rubrique)?p.rubrique as Rubric:undefined;
@@ -675,7 +681,7 @@ class HestiaEnergyCard extends LitElement {
   const e=v.eau,now=new Date(),leak=v.direct?.fuite?.minutes,head={ic:'drop',c:'--nw-water',subject:'Eau',over};
   if(!e)return this._ans({...head,period:'ce mois-ci',msg:'Pas de compteur d\'eau',why:'Ajoutez-le dans la page Énergie de Home Assistant : Hestia le lira.'});
   const days=e.jours??[],month=MONTHS[now.getMonth()];
-  const pill:[string,string]=leak?[`L'eau coule depuis ${Math.round(leak)} min`,leak>=60?'--nw-alert':'--nw-act']:['Pas de fuite','--nw-ok'];
+  const pill:[string,string]=leak?[`L'eau coule depuis ${Math.round(leak)} min`,leak>=60?'--nw-alert':'--nw-act']:['Pas de fuite','--nw-benefit'];
   const big=e.plus_gros;
   const ticks=days.map((d,i)=>i===days.length-1?'auj.':days.length<=12||[0,7,14,21,28].includes(i)?String(noon(d.jour).getDate()):'');
   return html`${this._ans({...head,period:`${month}, du 1er au ${now.getDate()}`,pill,
@@ -707,7 +713,7 @@ class HestiaEnergyCard extends LitElement {
   const high=p.part!=null&&p.part>=.7;
   const ranges=offpeak(v.heures_creuses),band=(i:number)=>ranges.some(([a,b])=>i*60+30>=a&&i*60+30<b);
   const far=p.part==null?'':p.part<.5?'vous en êtes loin':p.part<.8?'il reste de la marge':'vous en êtes tout près';
-  return html`${this._ans({...head,pill:kva?(high?['Près de la limite','--nw-act']:['De la marge','--nw-ok']):undefined,
+  return html`${this._ans({...head,pill:kva?(high?['Près de la limite','--nw-act']:['De la marge','--nw-benefit']):undefined,
     val:kw(p.kw*1000),unit:'kW',cap:`pris au réseau entre ${hour(p.h)} et ${hour(p.h+1)}`,
     why:html`${kva?html` Le compteur coupe au-delà de <b>${kva} kVA</b> (environ ${kva} kW) : ${far}.`:'L\'heure la plus chargée de la journée.'}`})}
    <div class="encs">${this._enc('Heure par heure',p.part!=null?html`La barre la plus haute reste à <b>${part(p.part)} de la limite</b> : ${high?'deux gros appareils de plus pourraient faire couper le compteur':'rien ne risque de faire couper le compteur'}.`:nothing,
@@ -716,7 +722,7 @@ class HestiaEnergyCard extends LitElement {
  }
 
  private _contract(v:View,over:boolean){
-  const c=v.contrat,now=new Date(),head={ic:'doc',c:'--nw-ok',subject:'Contrat',period:'ce mois-ci',over};
+  const c=v.contrat,now=new Date(),head={ic:'doc',c:'--nw-benefit',subject:'Contrat',period:'ce mois-ci',over};
   const ranges=offpeak(v.heures_creuses),night=atNight(ranges);
   const supposed=c?.a_confirmer??[];
   const kvaSay=html`${c?.kva?`Puissance : ${c.kva} kVA${supposed.includes('kva')?' (supposée)':''}.`:''}${supposed.length?html` <a class="to-hub" href="/hestia/energie/reglages" @click=${toHub}>${supposed.includes('option')?(supposed.length>1?'Option et puissance':'Option'):'Puissance'} à confirmer dans les Réglages ›</a>`:nothing}`;
