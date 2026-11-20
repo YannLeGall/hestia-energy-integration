@@ -8,7 +8,7 @@
 - Les machines : l'heure où elles démarrent le plus souvent, combien de cycles sur 10 tombent au prix fort, et le gain par lavage ou par séchage. Un départ différé déjà utilisé est salué.
 - La veille : le gain est dit pour 50 W coupés, pas pour toute la veille.
 - « Votre contrat, bien utilisé » garde la jauge des heures creuses et le verdict de l'option.
-- « En ce moment » : les flux redessinés d'après le modèle de Frank. Un halo de couleur entoure la production (jaune orangé), et la maison et le réseau prennent la couleur de l'heure (rouge en heures pleines, bleu en heures creuses). Sur chaque trait, des bulles grossissent au milieu, et elles vont plus vite quand la puissance monte. La tuile garde la hauteur des deux autres colonnes : l'eau du jour tient en une petite ligne sous la maison.
+- « En ce moment » : les flux redessinés d'après le modèle de Frank. Un léger halo de couleur entoure chaque cercle, plus vif quand la puissance monte : jaune orangé pour la production, et pour la maison et le réseau la couleur de l'heure (rouge en heures pleines, bleu en heures creuses). Sur chaque trait, des bulles grossissent au milieu, et elles vont plus vite quand la puissance monte. La tuile garde la hauteur des deux autres colonnes : l'eau du jour tient en une petite ligne sous la maison.
 
 ### Corrections
 

@@ -343,15 +343,16 @@ class HestiaEnergyCard extends LitElement {
   return html`<div class="sec"><button class="nw-fold-head" aria-expanded=${String(open)} @click=${()=>{const f=new Set(this._folded);if(open)f.add(id);else f.delete(id);this._folded=f;}}>
    <span class="nw-title">${title}</span><span class="nw-sum">${sum}</span><span class="nw-chevron">${icon('chev')}</span></button>${open?body:nothing}</div>`;
  }
- /** « En ce moment » as Frank's template draws it (20 Nov. 2026): a halo of colour behind each side, yellow-orange for
-     the production, red in peak hours and blue in off-peak hours for the grid and the home; on each line, bubbles that
+ /** « En ce moment » as Frank's template draws it (20 Nov. 2026): a light halo of colour around each circle, yellow-orange
+     for the production, red in peak hours and blue in off-peak hours for the grid and the home; on each line, bubbles that
      grow as they reach its middle, quicker as the power grows; the water of the day in one small line under the home. */
  private _flow(v:View){
   const d=v.direct!,cheap=(d.periode??'').includes('hc'),tone=cheap?'--nw-cold':'--nw-level3';
   const sun=v.equipement.soleil?Math.max(0,d.soleil_w??0):null,home=Math.max(0,d.maison_w??0);
   const buying=(d.achat_w??0)>=30,selling=!buying&&(d.revente_w??0)>=30,direct=sun==null?0:Math.min(sun,home);
   const watt=(w:number)=>w<1000?`${num(w,0)} W`:`${num(w/1000,2)} kW`;
-  const node=(ic:string,c:string,val:string,l:string,dim=false,more:unknown=nothing)=>html`<div class="fnode${dim?' dim':''}" style="--c:var(${c})"><span class="fdot">${icon(ic)}</span><span class="fl">${l}</span><span class="fv">${val}</span>${more}</div>`;
+  // A light halo around each circle, stronger with the power it carries (Frank, 20 Nov.: the halo on the circle, not on a box).
+  const node=(ic:string,c:string,val:string,l:string,a:number,dim=false,more:unknown=nothing)=>html`<div class="fnode${dim?' dim':''}" style="--c:var(${c});--a:${Math.min(1,Math.max(.25,a)).toFixed(2)}"><span class="fdot">${icon(ic)}</span><span class="fl">${l}</span><span class="fv">${val}</span>${more}</div>`;
   // Faster with more power: 3.2 s for a trickle, 1.2 s from 3 kW.
   const link=(c:string,w:number,say:[string,string],back=false)=>{
    const on=w>=30,dur=on?Math.max(1.2,3.2-w/1500):0;
@@ -361,12 +362,11 @@ class HestiaEnergyCard extends LitElement {
   const gridSay:[string,string]=buying?[`↙ ${watt(gridW)}`,'achetés']:[`↗ ${watt(gridW)}`,'revendus'];
   // The water of the day: one small line under the home, never a node that makes the tile taller (Frank, 20 Nov.).
   const water=v.eau&&v.eau.jour_l>0?html`<span class="fw">${icon('drop')}${num(v.eau.jour_l,0)} L d'eau aujourd'hui</span>`:nothing;
-  const halo=`--sunA:${sun==null?0:Math.min(1,sun/1500).toFixed(2)};--gridA:${buying||selling?Math.min(1,.35+gridW/2000).toFixed(2):'.25'};--tone:var(${tone})`;
-  return html`<div class="flow2${sun==null?' two':''}" style=${halo}>
-   ${sun!=null?html`${node('sun','--nw-prod',watt(sun),'Production',sun<30)}${link('--nw-prod',direct,[watt(direct),'en direct'])}`:nothing}
-   ${node('home',tone,watt(home),'Maison',false,water)}
+  return html`<div class="flow2${sun==null?' two':''}">
+   ${sun!=null?html`${node('sun','--nw-prod',watt(sun),'Production',sun/1500,sun<30)}${link('--nw-prod',direct,[watt(direct),'en direct'])}`:nothing}
+   ${node('home',tone,watt(home),'Maison',home/1500,false,water)}
    ${link(tone,gridW,gridSay,buying)}
-   ${node('grid',tone,`${selling?'+':''}${watt(gridW)}`,'Réseau',!buying&&!selling)}
+   ${node('grid',tone,`${selling?'+':''}${watt(gridW)}`,'Réseau',gridW/1500,!buying&&!selling)}
   </div>`;
  }
  private _nowSection(v:View){
