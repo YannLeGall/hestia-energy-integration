@@ -101,7 +101,7 @@ class Advices(unittest.TestCase):
         self.assertIn("D'octobre à novembre, programmez-le à 0 h 30. Remettez 11 h en décembre", a["mieux"])
         self.assertEqual(a["euros_an"], round(heater["euros_sans_soleil"]))
         self.assertEqual(a["mieux_heures"], [[0, 1, "hc"]])
-        self.assertEqual((a["depart"], a["lancer"]), (11 * 60, 30))  # the pins of the card's strips
+        self.assertEqual((a["departs"], a["lancer"]), ([[11 * 60, 1.0]], 30))  # the pins of the card's strip
 
     def test_a_machine_at_the_dear_hour(self):
         a = self.advices["machine_heures"]
@@ -109,7 +109,11 @@ class Advices(unittest.TestCase):
         self.assertEqual(a["maintenant"], "Il tourne surtout vers 20 h : tous les lavages au prix fort.")
         self.assertEqual(a["mieux"], "Les jours de soleil, lancez-le entre 12 h et 14 h. Sinon, départ différé à 0 h 30.")
         self.assertTrue(a["sous"].startswith("par an, ") and a["sous"].endswith(" par lavage"))
-        self.assertEqual((a["depart"], a["lancer"]), (20 * 60, 30))
+        self.assertEqual((a["departs"], a["lancer"], a["jours"]), ([[20 * 60, 1.0]], 30, 60))
+        # The day's prices by half hours: off-peak from 0 h 13 (0 h 00 counts), the sun's hours, peak hours for the rest.
+        self.assertEqual(a["zones"][0][2], "hc")
+        self.assertIn([12 * 60, 14 * 60, "soleil"], a["zones"])
+        self.assertEqual(sum(b - x for x, b, _ in a["zones"]), 1440)
 
     def test_without_panels_the_night_only(self):
         a = {x["id"]: x for x in habits.advices(self.found, self.contract, sun=False)}["machine_heures"]

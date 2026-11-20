@@ -210,12 +210,21 @@ def _device(hours, sent: dict, grid: dict, sunny: set, offpeak, tz, end: datetim
         recent = [c for c in cycles if c["start"] >= end.astimezone(tz) - RECENT]
         chosen = recent if len(recent) >= 5 else cycles
         hour_of, share = _mode([c["start"].hour for c in chosen])
+        # Its usual starts, for the pins of the card's strip (Frank, 20 Nov.: « un petit trait et une icône le moment où il
+        # a tourné »): the hours that hold a tenth of the starts or more, two hours apart at least, three at most.
+        starts = [c["start"].hour for c in chosen]
+        kept: list[tuple[int, float]] = []
+        for h in sorted(set(starts), key=lambda h: (-starts.count(h), h)):
+            part = starts.count(h) / len(starts)
+            if part >= 0.1 and len(kept) < 3 and all(min(abs(h - k), 24 - abs(h - k)) >= 2 for k, _ in kept):
+                kept.append((h, part))
         at_night = [c for c in cycles if c["hc"]]
         starts_day = [c["start"].hour for c in cycles if not c["hc"]]
         spread = [h for h in range(24) if starts_day.count(h) >= max(1, 0.03 * len(cycles))]
         out.update({"cycles": len(cycles), "kwh_cycle": round(sum(c["kwh"] for c in cycles) / len(cycles), 2),
                     "duree": max(1, round(sum(c["hours"] for c in cycles) / len(cycles))),
                     "depart": hour_of, "depart_part": round(share, 3),
+                    "departs": [[h, round(p, 2)] for h, p in kept], "departs_jours": RECENT.days if chosen is recent else 365,
                     "prix_fort": round(sum(1 for c in cycles if c["peak"] >= c["kwh"] / 2) / len(cycles), 3),
                     "en_differe": round(len(at_night) / len(cycles), 3),
                     "depart_nuit": _mode([c["start"].hour for c in at_night])[0] if at_night else None,
@@ -300,6 +309,8 @@ def advices(found: dict | None, contract, sun: bool) -> list[dict]:
     at = tariff.clock(start)
     gap = found["prix"]["hp"] - found["prix"]["hc"]
     window = found.get("soleil_heures") if sun else None
+    zones = _zones(contract, window)
+    night = _zones(contract, None)
     out = []
     for d in found["appareils"]:
         if d.get("cycles") is None:
@@ -310,17 +321,30 @@ def advices(found: dict | None, contract, sun: bool) -> list[dict]:
         else:
             item = _machine(d, at, night_hours, window, gap)
         if item is not None:
-            # The two clock times the card pins on its strips (Frank, 20 Nov.: « on ne sait pas quand il tourne et à
-            # quelle heure le faire tourner »): when it starts today, when to start it.
-            # A machine that runs at any hour has no start time worth a pin.
-            if d["type"] == "chauffe_eau":
-                first = d["depart"]
-            elif d["en_differe"] >= 0.4 and d.get("depart_nuit") is not None:
-                first = d["depart_nuit"]
-            else:
-                first = d["depart"] if d["depart_part"] >= 0.15 else None
-            out.append({"rubrique": "contrat", "unite": "par an", "profil": d["profil"],
-                        "depart": first * 60 if first is not None else None, "lancer": start, **item})
+            # The card's strip (Frank, 20 Nov.): the day's prices as segments, the usual starts and the hour to start it as pins.
+            # The heater's advice is about the months without sun: its strip shows no sun, 11 h is then a peak hour.
+            heater = d["type"] == "chauffe_eau"
+            out.append({"rubrique": "contrat", "unite": "par an", "profil": d["profil"], "zones": night if heater else zones, "lancer": start,
+                        "departs": [[h * 60, p] for h, p in d["departs"]], "jours": d["departs_jours"], **item})
+    return out
+
+
+def _zones(contract, window: list[int] | None) -> list[list]:
+    """The day by half hours, as the card's strip draws it: off-peak, the sun's usual hours (they win, the sun is the
+    cheapest), peak hours for the rest; neighbour half hours of one kind joined: [[start, end, kind]] in minutes."""
+    kinds = []
+    for i in range(48):
+        middle = i * 30 + 15
+        kind = "hc" if any(r.contains(middle) for r in contract.offpeak.ranges) else "hp"
+        if window and window[0] * 60 <= middle < window[1] * 60:
+            kind = "soleil"
+        kinds.append(kind)
+    out: list[list] = []
+    for i, kind in enumerate(kinds):
+        if out and out[-1][2] == kind:
+            out[-1][1] = (i + 1) * 30
+        else:
+            out.append([i * 30, (i + 1) * 30, kind])
     return out
 
 
