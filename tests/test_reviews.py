@@ -46,3 +46,23 @@ class SoFar(unittest.TestCase):
         self.assertIsNotNone(found["euros"])
         self.assertIsNotNone(found["hier_euros"])
         self.assertIsNone(report.so_far(Reviews.home, Reviews.contract, Reviews.table, datetime(2026, 11, 5, 0, 30, tzinfo=PARIS)))
+
+
+class SunShort(unittest.TestCase):
+    """Prod, 19 Nov. 2026: 9.4 kWh bought, 4.4 kWh of sun and 5.5 kWh sent. More sent than produced is impossible:
+    the card said « le soleil a couvert 0 % ». The shares are now unknown (no real data needed)."""
+
+    def period(self, bought, sun, sent):
+        day = datetime(2026, 11, 19, tzinfo=PARIS)
+        return report.Period(day, day, bought, 2.0, 0.6, 0, sun, sent)
+
+    def test_more_sent_than_produced_is_not_known(self):
+        p = self.period(9.37, 4.38, 5.51)
+        self.assertIsNone(p.sun_cover)
+        self.assertIsNone(p.sun_kept)
+        self.assertIsNone(p.as_dict()["soleil_couvre"])
+
+    def test_an_ordinary_day_keeps_its_shares(self):
+        p = self.period(12.36, 4.94, 1.69)
+        self.assertEqual(round(p.sun_cover * 100), 21)
+        self.assertEqual(round(p.sun_kept * 100), 66)

@@ -8,7 +8,8 @@ they work from palier 0 (a Linky read by HA Linky):
 - the heating: what one degree less would save this winter (the line through each day's cold, Hestia Météo);
 - the month: dearer than the same month a year before.
 
-Plain Python. Each advice: {id, titre, pourquoi, euros_an, unite, rubrique} (PHRASES.md « Pistes »), most useful first.
+Plain Python. Each advice: {id, titre, pourquoi, euros_an, unite, rubrique} (PHRASES.md « Pistes »), most useful first;
+some also say {maintenant, mieux, gain, sous}: what is done today, what would be better, the euros shown (maquette D).
 """
 from __future__ import annotations
 
@@ -20,6 +21,7 @@ MIN_HOURLY_DAYS = 7        # days known hour by hour before the contract or the 
 MIN_NIGHTS = 7
 CONTRACT_GAIN = 15.0       # € a year below which a change of option is not worth a word
 BASELOAD_W = 120           # a baseload below this is an ordinary home's
+BASELOAD_STEP_W = 50       # the gain of the baseload advice: what 50 W less would save
 HEATING_SHARE = 0.15       # the heating's share of the purchases below which one degree is not worth a word
 MONTH_SHARE, MONTH_EUR = 0.15, 10.0
 WINTER = (10, 11, 12, 1, 2, 3, 4)
@@ -100,7 +102,14 @@ def baseload(home, price: float | None) -> dict | None:
     euros = baseline.yearly_euros(found.watts, price) if found else None
     if found is None or euros is None or found.watts < BASELOAD_W:
         return None
-    return _advice("veille_haute", {"w": phrases.number(found.watts), "euros": phrases.euros(euros)}, euros, "veille")
+    out = _advice("veille_haute", {"w": phrases.number(found.watts), "euros": phrases.euros(euros)}, euros, "veille")
+    # Today, better, the gain (maquette D): the whole baseload is never all cut, so the gain is said for 50 W.
+    step = BASELOAD_STEP_W
+    out.update({"nom": "La veille", "maintenant": phrases.fill(phrases.BETTER["veille_haute"][0], {"w": phrases.number(found.watts),
+                                                                                "euros": phrases.euros(euros)}),
+                "mieux": phrases.BETTER["veille_haute"][1], "gain": round(euros * step / found.watts),
+                "sous": f"par an pour {step} W coupés"})
+    return out
 
 
 def heating_degree(home, now: datetime, cold: dict, learned, price: float | None) -> dict | None:
@@ -116,7 +125,10 @@ def heating_degree(home, now: datetime, cold: dict, learned, price: float | None
     if total <= 0 or heat / total < HEATING_SHARE or not heating_days:
         return None
     one_degree = learned.per_degree_kwh * heating_days * price
-    return _advice("chauffage_degre", {"euros": phrases.euros(one_degree), "part": round(heat / total * 100)}, one_degree, "chauffage")
+    out = _advice("chauffage_degre", {"euros": phrases.euros(one_degree), "part": round(heat / total * 100)}, one_degree, "chauffage")
+    out.update({"nom": "Le chauffage", "maintenant": phrases.fill(phrases.BETTER["chauffage_degre"][0], {"part": round(heat / total * 100)}),
+                "mieux": phrases.BETTER["chauffage_degre"][1]})
+    return out
 
 
 def month_budget(last_year, projection: float | None, now: datetime) -> dict | None:

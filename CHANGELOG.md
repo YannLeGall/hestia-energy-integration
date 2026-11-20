@@ -1,3 +1,62 @@
+## 1.0.0b6 — Une vue d’ensemble technique, et la documentation
+
+### Améliorations
+
+- La vue d’ensemble du panneau devient technique : elle dit si tout fonctionne. Trois chiffres (les sources à jour, les entités qui ont une valeur, les jours d’historique lus), chaque source avec l’heure de ses dernières nouvelles (« il y a 8 s », « en retard »), ce qu’Énergie peut calculer avec votre équipement, ce qu’Hestia a corrigé, et l’heure du dernier calcul. Une source qui se tait depuis plusieurs heures passe dans « À régler ».
+- Les euros du mois et les derniers bilans passent dans la page Bilan. Les conseils pour économiser restent sur la carte.
+
+### Documentation
+
+- Une vraie documentation pour la première version stable, sur le modèle de Hestia Weather : un bandeau en haut de la page, une icône qui s’affiche dans le Marketplace, HACS et la page des intégrations, et des pages pour chaque sujet (installation pas à pas, la carte, l’onglet Énergie, le contrat, les extensions, les entités).
+
+## 1.0.0b5 — Une frise par appareil
+
+### Améliorations
+
+- « Pour économiser » : une seule frise par appareil, à la manière de la frise des événements de Weather. La journée y est dessinée avec ses prix (heures creuses, soleil, heures pleines), l'icône de l'appareil marque ses départs habituels avec leur heure, et une pastille verte marque l'heure à viser. Sous la frise, une ligne dit sur quelle durée sont comptés les départs (les 2 derniers mois).
+- « Aujourd'hui » devient « D'habitude » pour le chauffe-eau et les machines : ce sont des habitudes, pas la journée en cours.
+
+## 1.0.0b4 — Des frises qui disent l'heure
+
+### Améliorations
+
+- « Pour économiser » : les frises disent l'heure. Un repère marque l'heure où l'appareil démarre le plus souvent (« Il démarre le plus souvent à 19 h ») et celle où le lancer (« Lancez-le à 0 h 30 ou au soleil »). Les heures où il tourne sont des blocs d'une seule couleur (rouge en heures pleines, bleu en heures creuses, jaune au soleil), et chaque bloc est dit en mots sous la frise (« de 19 h à 23 h, en heures pleines »).
+- « En ce moment » ne liste plus ce qui est en marche : la carte Appareils le dit déjà.
+
+## 1.0.0b3 — Pour économiser, en trois temps
+
+### Améliorations
+
+- « Pour économiser » dit chaque conseil en trois temps : ce qui se fait aujourd'hui, ce qui serait mieux, et ce que ça rapporte. Le chauffe-eau et chaque machine y ont leur ligne, rangée par euros avec la veille et le chauffage.
+- Pour le chauffe-eau et les machines, une frise de 24 heures montre quand ils tournent aujourd'hui, et quand ils tourneraient mieux.
+- Le chauffe-eau : Hestia voit s'il est programmé à heure fixe et à quelle heure. Avec des panneaux, elle dit les mois où le soleil ne l'atteint pas et conseille la nuit pour ces mois-là seulement.
+- Les machines : l'heure où elles démarrent le plus souvent, combien de cycles sur 10 tombent au prix fort, et le gain par lavage ou par séchage. Un départ différé déjà utilisé est salué.
+- La veille : le gain est dit pour 50 W coupés, pas pour toute la veille.
+- « Votre contrat, bien utilisé » garde la jauge des heures creuses et le verdict de l'option.
+- « En ce moment » : les flux redessinés d'après le modèle de Frank. Un léger halo de couleur entoure chaque cercle, plus vif quand la puissance monte : jaune orangé pour la production, et pour la maison et le réseau la couleur de l'heure (rouge en heures pleines, bleu en heures creuses). Sur chaque trait, des bulles grossissent au milieu, et elles vont plus vite quand la puissance monte. La tuile garde la hauteur des deux autres colonnes : l'eau du jour tient en une petite ligne sous la maison.
+
+### Corrections
+
+- Le soleil pris par un appareil : quand le chauffe-eau mange tout le surplus des panneaux, la maison ne revend plus rien. Hestia comptait alors ces heures en heures pleines. Elle compte maintenant le soleil qu'il y aurait eu sans l'appareil.
+
+## 1.0.0b2 — Votre contrat, bien utilisé
+
+### Nouveautés
+
+- « Votre contrat, bien utilisé », dans la carte complète : sur les 12 derniers mois, la part de vos achats en heures creuses face à la part à partir de laquelle elles rapportent, et si votre option est la bonne (ce qu'aurait coûté la Base). Jamais sur un seul mois : en hiver, la part des heures creuses baisse.
+- Pour le chauffe-eau et les machines (lave-linge, lave-vaisselle, sèche-linge) : ce qu'ils prennent au soleil, la nuit et en heures pleines, et ce que rapporterait de décaler les heures pleines, en euros par an. Avec des panneaux, le conseil dit « au soleil d'abord, sinon la nuit ».
+- La puissance souscrite : chaque jour, la plus forte pointe achetée sur 12 mois, face à la puissance juste en dessous. Hestia dit de la garder, ou ce que la puissance plus basse ferait gagner sur l'abonnement.
+- Dans la carte Contrat : « Quand tournent vos machines », et les jours de chaque mois où le soleil en trop suffit pour une machine.
+- Le bandeau « Le chauffe-eau chauffe en partie au réseau » dit ce qu'il y a à gagner par an.
+
+### Corrections
+
+- « Un compteur compte double » ne parle plus d'un jour ancien : un saut de compteur passé dans l'historique ne se corrige pas. Le message n'apparaît que si les appareils dépassent la maison au moins 3 jours sur les 30 derniers.
+- Quand il apparaît, il dit le dernier jour en chiffres et le compteur à regarder (deux appareils qui comptent pareil, ou les plus gros ce jour-là), et il ouvre la page Énergie de Home Assistant, où cela se corrige. Avant, il renvoyait vers la page où on était déjà.
+- La nuit, les panneaux à 0 W qui se taisent ne sont plus pris pour un capteur en panne : « Donnée douteuse » ne s'allume plus chaque nuit.
+- La carte ne dit plus « Un capteur ne répond plus » pour un point déjà réglé (le poêle déclaré en granulés) ou qu'on ne peut pas régler. Elle renvoie vers « À régler » seulement quand il y a vraiment quelque chose à faire.
+- Quand la revente dépasse la production (une partie de la production n'a pas été mesurée), la part du soleil n'est plus affichée à 0 % : la carte dit que la production manque.
+
 ## 1.0.0b1 — Le conseiller énergie de la maison
 
 ### Nouveautés
@@ -14,6 +73,7 @@
 - Le soleil : la part couverte par les panneaux, la revente, et un panneau qui produit moins que d’habitude.
 - Le chauffage de la saison : radiateurs, et poêle à granulés avec Suivi Stock Pellet.
 - La carte Hestia Énergie : complète, tuile, conseils, et sept cartes de détail (soleil, chauffage, veille, eau, appareils, pointe, contrat). Chacune répond en une phrase, sur une seule période.
+- La carte complète s’ouvre sur l’horloge de la journée : un trait par heure, ce que la maison a acheté (heures pleines et creuses) et ce que le soleil a donné, une aiguille sur l’heure, et à côté le prix du moment, l’heure la plus chargée et le soleil du jour. Avec un Linky lu le lendemain, elle montre la veille.
 - L’onglet Énergie du panneau Hestia-FB : vue d’ensemble, sources, appareils, réglages, extensions, bilan, à propos.
 - Les bilans d’hier, de la semaine et du mois, et les alertes, en notification si vous le voulez (aucune par défaut).
 - Des entités pour vos automatisations : coût du jour et du mois, prix du moment, heures creuses, veille de nuit, soleil en trop, pointe proche, conseil et sa couleur.

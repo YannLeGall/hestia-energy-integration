@@ -25,7 +25,7 @@ BANNER = {
     "machine_heures_pleines": (GESTE, "Heures pleines pour {machine}.",
                                "La prochaine fois, attendez les heures creuses ({heure_hc})."),
     "chauffe_eau_reseau": (GESTE, "Le chauffe-eau chauffe en partie au réseau.",
-                           "La prochaine fois : soleil d'abord, le reste en heures creuses."),
+                           "Soleil d'abord, sinon les heures creuses[ : {euros} € par an à gagner]."),
     "oublie": (GESTE, "{appareil} est allumé depuis {duree}.", "Oublié ?"),
     "poele_moins_cher": (GESTE, "Le poêle chaufferait {facteur} fois moins cher que les radiateurs.",
                          "[Ce soir,] allumez-le plutôt."),
@@ -54,6 +54,13 @@ PISTES = {
     "chauffage_degre": ("Baissez le chauffage d'un degré", "Le chauffage fait environ {part} % de vos achats.", "par hiver"),
     "budget_mois": ("Ce mois coûte plus que d'habitude",
                     "Au rythme actuel, environ {euros} € : {ecart} € de plus qu'en {mois} dernier.", None),
+}
+# « Pour économiser » as maquette D says it (Frank, 19 Nov. 2026): what is done today, then what would be better.
+BETTER = {
+    "veille_haute": ("Quand tout dort, la maison consomme encore {w} W, jour et nuit : {euros} € par an.",
+                     "Faites le tour avec les prises : box, écrans en veille, appareils oubliés. Coupez ce qui ne sert pas la nuit."),
+    "chauffage_degre": ("Le chauffage fait environ {part} % de vos achats d'électricité.",
+                        "Baissez la consigne d'un degré dans les pièces chauffées."),
 }
 # The tile's chip (PHRASES.md § 4): « Rien à faire », « À revoir », « Bon moment », « Demain rouge », « Urgent ».
 CHIP = {URGENT: "Urgent", GESTE: "À revoir", BENEFICE: "Bon moment", RIEN: "Rien à faire"}
@@ -90,7 +97,7 @@ KNOW = {
     "hc_dans": "Heures creuses dans {minutes} min.",
     "revente_vaut_peu": "Un kWh gardé vaut {facteur} fois un kWh revendu.",
     "veille_hausse": "La nuit, {logement} consomme plus qu'en {mois} : environ {euros} € de plus par an.",
-    "capteur_douteux": "Un capteur ne répond plus ou ne bouge plus : voir l'onglet Énergie.",
+    "capteur_douteux": "Un compteur est à régler : voir « À régler » dans l'onglet Énergie.",
     "budget": "Au rythme actuel, le mois finira à {euros} €.",
     "soleil_garde": "Hier, la maison a gardé {pourcent} % de son soleil.",
     "soleil_evite": "Ce mois, le soleil a évité {euros} € d'achats.",

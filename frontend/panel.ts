@@ -1,16 +1,19 @@
 import {LitElement,html,nothing,css,type TemplateResult} from 'lit';
 import {customElement,property,state} from 'lit/decorators.js';
-import {hubStyles,modernStyles,pageStyles,listSection,listRow,saveBar,segmented,toggle,moreRow,helpTip,aboutPage,SOCLE} from './socle/ui';
+import {hubStyles,modernStyles,pageStyles,listSection,listRow,saveBar,segmented,toggle,moreRow,helpTip,aboutPage,kpis,SOCLE} from './socle/ui';
 
 /* The « Énergie » tab of the Hestia-FB panel, as validated by Frank on 8 Nov. 2026 (hestia-energie/docs/maquette-hub-energie.html,
    INTERFACE.md § 5): Vue d'ensemble · Sources · Appareils · Réglages · Extensions · Bilan · À propos.
    Everything shown comes from the integration (hestia_energy/hub, settings, periods); the tab computes nothing but sums. */
 
 type Hass={callWS:<T>(msg:Record<string,unknown>)=>Promise<T>;states:Record<string,{state:string;attributes:Record<string,unknown>}>;language?:string};
-type Todo={titre:string;texte:string;page:string};
+type Todo={titre:string;texte:string;page:string;sur?:string};
 type Period={debut:string;kwh_achetes:number;euros:number|null;euros_energie:number|null;soleil_couvre:number|null;revendu_euros:number|null;soleil_kwh?:number|null};
 type Source={id:string;groupe:string;nom:string;usage:string;etat:'ok'|'todo';sous?:string|null;chiffres:{texte:string;benefice?:boolean}[];
- origine:{nom:string;role:string;texte:string;entite:string;par?:string|null}[];corrige:string[];enedis?:{titre:string;texte:string}[];suit_enedis?:boolean;gaz_declare?:boolean};
+ origine:{nom:string;role:string;texte:string;entite:string;par?:string|null}[];corrige:string[];enedis?:{titre:string;texte:string}[];suit_enedis?:boolean;gaz_declare?:boolean;frais?:Fresh};
+type Fresh={etat:'ok'|'retard'|'muet';vu:string|null};
+type Tech={historique:{du:string;jours:number}|null;capacites:{id:string;nom:string;etat:'ok'|'attend'|'non';avec:string|null;page:string|null}[];
+ calcul:{a:string|null;duree_s:number|null};appareils:{total:number;repondent:number}};
 type Device={id:string;stat:string;nom:string;sans_nom:boolean;groupe:string;groupe_devine:string;kwh:number|null;euros:number|null;w:number|null;
  a_regler:string|null;a_regler_detail:string|null;via:string;corrige:string[];dans:string|null;puissance:string|null;
  mesure_par:string|null;integration:string|null;piece:string|null;nom_compteur:string;nom_puissance:string|null;w_direct:number|null};
@@ -20,14 +23,14 @@ type Hub={pret:boolean;soleil:boolean;direct:boolean;vide:boolean;a_regler:Todo[
  mois:Period|null;projection:number|null;mois_an_dernier:Period|null;douze_mois:{euros:number|null;du:string;au:string;soleil_couvre:number|null;revendu_euros:number|null}|null;
  bilans:{id:string;titre:string;texte:string;euros:number|null;kwh:number}[];chauffage:{etat:string;mois?:{kwh:number;eur:number|null}|null;poele?:{saison?:{kg:number;eur:number|null}}|null}|null;
  eau:{mois_l:number;mois_euros:number|null}|null;sources:Source[];appareils:{liste:Device[];mois:string|null;part:number|null};extensions:Ext[];groupes:[string,string][];
- tarifs:string|null;notifie:boolean;mis_a_jour?:string;pistes:{id:string;titre:string;pourquoi:string;euros_an:number|null;unite:string|null}[]};
+ tarifs:string|null;notifie:boolean;mis_a_jour?:string;technique?:Tech;pistes:{id:string;titre:string;pourquoi:string;euros_an:number|null;unite:string|null}[]};
 type Found<V>={valeur:V|null;source:string|null};
 type Settings={reglages:Record<string,unknown>;trouve:{option:Found<string>;offpeak:Found<[string,string][]>;kva:Found<number>;offer:Found<string>;
  tarif_bleu:{hp?:number|null;hc?:number|null;base?:number|null;abonnement:number|null};prix_page:Record<string,number>;export_price:Found<number>;water_price:Found<number>;
  margin:Found<number>;sac_kg:number|null;notify:{id:string;nom:string}[];a:{revente:boolean;eau:boolean;poele:boolean;delestage:boolean;un_compteur:boolean}}};
 
 const REPO='https://github.com/hestiaFB/hestia-energy-integration';
-const VERSION='1.0.0b1';
+const VERSION='1.0.0b6';
 const HA_ENERGY='/config/energy';
 const MONTHS=['janvier','février','mars','avril','mai','juin','juillet','août','septembre','octobre','novembre','décembre'];
 const DAYS=['dimanche','lundi','mardi','mercredi','jeudi','vendredi','samedi'];
@@ -37,6 +40,19 @@ const eur=(v:number|null|undefined)=>v==null?'—':(Math.abs(v)<100?num(v,2):num
 const kwh=(v:number)=>num(v,v<10?1:0)+' kWh';
 const cap=(s:string)=>s.charAt(0).toUpperCase()+s.slice(1);
 const monthOf=(iso:string|null|undefined)=>iso?MONTHS[new Date(iso+(iso.length===10?'T12:00':'')).getMonth()]:'';
+// A time said the way the overview says it: « 14 h 32 », « il y a 8 s », « hier à 23 h », « le 18 novembre ».
+const hm=(d:Date)=>`${d.getHours()} h ${String(d.getMinutes()).padStart(2,'0')}`;
+const dayOf=(d:Date)=>`${d.getDate()===1?'1er':d.getDate()} ${MONTHS[d.getMonth()]}`;
+function ago(iso:string|null|undefined){
+ if(!iso)return 'jamais';
+ const d=new Date(iso),now=new Date(),s=Math.max(0,Math.round((now.getTime()-d.getTime())/1000));
+ if(s<60)return `il y a ${s} s`;
+ if(s<3600)return `il y a ${Math.round(s/60)} min`;
+ const y=new Date(now);y.setDate(y.getDate()-1);
+ if(d.toDateString()===now.toDateString())return `à ${hm(d)}`;
+ if(d.toDateString()===y.toDateString())return `hier à ${hm(d)}`;
+ return `le ${dayOf(d)}`;
+}
 const parseHc=(s:unknown):[string,string][]|null=>typeof s==='string'&&s.trim()?s.split(',').map(r=>r.split('-').map(x=>x.trim().replace('h',':').padStart(5,'0')) as [string,string]):null;
 const hcText=(l:[string,string][])=>l.filter(([a,b])=>a&&b).map(([a,b])=>`${a}-${b}`).join(', ')||null;
 
@@ -54,6 +70,7 @@ export class HestiaEnergySetup extends LitElement {
   .pill{display:inline-flex;align-items:center;gap:6px;font-size:var(--nw-fs-small,12px);font-weight:600;border-radius:999px;padding:3px 10px;background:var(--nk-selected,var(--nk-surface));color:var(--primary-text-color);white-space:nowrap}
   .pill::before{content:"";width:7px;height:7px;border-radius:50%;background:var(--nk-muted)}
   .pill.ok::before{background:var(--nk-ok,var(--nk-accent))}.pill.todo::before{background:var(--nk-todo)}.pill.plain::before{display:none}
+  .pill.wait::before{background:transparent;border:1.5px solid var(--nk-muted)}.off{color:var(--nk-muted)}.when{color:var(--nk-muted);font-size:var(--nw-fs-text,14px)}
   .pill.benefit::before{background:var(--en-benefit)}.pill.run::before{background:var(--nk-ok,var(--nk-accent));box-shadow:0 0 0 3px color-mix(in srgb,var(--nk-ok,var(--nk-accent)) 25%,transparent)}
   .chips{display:flex;flex-wrap:wrap;gap:6px;margin:10px 0 18px;align-items:center}
   .m{background:var(--nk-selected,var(--nk-surface));border-radius:999px;padding:4px 12px;font-size:var(--nw-fs-text,14px);font-weight:600}
@@ -188,25 +205,41 @@ export class HestiaEnergySetup extends LitElement {
  private haRow(label:string,sub?:string){return listRow({label,sub,value:nothing,go:()=>this.openHa()});}
  private fixedRow(list:string[]){return list.length?listSection('',[moreRow('Corrigé par Hestia',String(list.length),list.map(t=>listRow({label:t})))]):nothing;}
 
- /* ── Vue d'ensemble (H2) ── */
+ /* ── Vue d'ensemble (H2): technical (Frank, 20 Nov. 2026): what Énergie reads, what it can work out, whether it all runs.
+    The euros and the latest reports are on Bilan; the advice on the card. ── */
+ private freshText(f:Fresh|undefined){
+  if(!f)return '';
+  // Short, to hold on one line on a phone: the dot says whether it is late.
+  return f.etat==='muet'?'ne répond plus':ago(f.vu);
+ }
  private overview(h:Hub){
-  const t=h.a_regler,b=h.a_ameliorer,month=MONTHS[new Date().getMonth()],m=h.mois,last=h.mois_an_dernier;
-  const example=h.veille?.euros_par_an!=null?`Par exemple : la nuit, quand tout dort, la maison consomme encore ${num(h.veille.w)} W. Cela fait ${num(h.veille.euros_par_an)} € par an.`
-   :m?.euros!=null?`Par exemple : depuis le 1er ${month}, la maison a coûté ${eur(m.euros)}.`:null;
-  const lastYear=last?.euros!=null?`${eur(last.euros)} en ${month} ${new Date().getFullYear()-1}`:null;
-  return html`${this.head('Énergie',{pill:t.length?['todo',`${t.length} point${t.length>1?'s':''} à régler`]:['ok','Rien à faire'],
-    paras:['Énergie lit vos compteurs et vous dit, en euros, ce que coûte la maison, ce qui coûte trop et quand l’électricité est moins chère.',...(example?[example]:[])]})}
+  const x=h.technique,src=h.sources,silent=src.filter(s=>s.frais&&s.frais.etat!=='ok');
+  const t:Todo[]=[...h.a_regler,...silent.filter(s=>!h.a_regler.some(a=>a.page==='sources/'+s.id)).map(s=>({titre:s.frais!.etat==='muet'?`${s.nom} : ne répond plus`:`${s.nom} : rien depuis ${ago(s.frais!.vu).replace(/^à /,'')}`,
+   texte:'Le compteur ne donne plus de nouvelles. À vérifier dans Home Assistant.',page:'sources/'+s.id}))];
+  const calc=x?.calcul.a?new Date(x.calcul.a):null,dev=x?.appareils;
+  const entities=Object.keys(this.hass?.states??{}).filter(e=>/^(binary_)?sensor\.hestia_energy_/.test(e));
+  const valued=entities.filter(e=>!['unknown','unavailable'].includes(this.hass!.states[e].state)).length;
+  const fixed=[...src.flatMap(s=>s.corrige),...h.appareils.liste.flatMap(d=>d.corrige)];
+  const upToDate=src.length-silent.length;
+  return html`${this.head('Énergie',{pill:t.length?['todo',`${t.length} point${t.length>1?'s':''} à régler`]:['ok','Tout fonctionne'],
+    lead:calc?html`<span class="when">Dernier calcul à ${hm(calc)}</span>`:undefined,
+    paras:['Ce qu’Énergie lit, ce qu’elle peut calculer, et si tout fonctionne. Les euros sont dans Bilan, les conseils sur la carte.']})}
+   ${h.vide?nothing:kpis([{value:`${upToDate} / ${src.length}`,label:'sources à jour',level:upToDate===src.length?'ok':'todo',go:()=>this.go('sources')},
+    {value:`${valued} / ${entities.length}`,label:'entités avec une valeur'},
+    {value:x?.historique?`${num(x.historique.jours)} jours`:'—',label:'d’historique lu'}])}
    ${t.length?listSection('À régler',this.todoRows(t,true)):nothing}
-   ${h.vide?nothing:html`<div class="stats">
-    <button class="stat" @click=${()=>this.go('bilan')}><b>${eur(m?.euros)}</b><span>depuis le 1er ${month} ›</span></button>
-    <div class="stat"><b>${h.projection!=null?'≈ '+eur(h.projection):'—'}</b><span>prévus pour ${month}</span>${lastYear?html`<small>${lastYear}</small>`:nothing}</div>
-    ${h.soleil?html`<div class="stat"><b>${m?.soleil_couvre!=null?m.soleil_couvre+' %':'—'}</b><span>du courant vient du soleil</span></div>`
-     :html`<div class="stat"><b>${eur(h.douze_mois?.euros)}</b><span>sur les 12 derniers mois</span></div>`}</div>`}
-   ${b.length||h.pistes?.length?listSection('À améliorer',[...(h.pistes??[]).map(p=>listRow({label:html`<b>${p.titre}</b>`,name:p.titre,sub:p.pourquoi,
-     value:p.euros_an!=null?html`<span class="money">${num(p.euros_an)} € ${p.unite??'par an'}</span>`:undefined})),...this.todoRows(b,false)],
-     {help:'Les conseils « à froid » : changer une habitude ou le contrat. Calculés sur vos 12 derniers mois ; les gestes du moment restent sur la carte.'}):nothing}
-   ${h.bilans.length?listSection('Les derniers bilans',h.bilans.map(r=>listRow({label:this.reviewName(r),value:html`<span class="money">${eur(r.euros)}</span>`,sub:r.texte,
-     go:r.id==='mois'?()=>this.go('bilan'):undefined})),{more:h.notifie?undefined:html`<button class="linkbtn" @click=${()=>this.go('reglages')}>Les recevoir chaque matin</button>`}):nothing}`;
+   ${src.length?listSection('Sources',[...src.map(s=>listRow({label:html`<b>${s.nom}</b>`,name:s.nom,sub:s.origine.map(o=>o.par?`${o.nom} (${o.par})`:o.nom).join(' · ')||s.usage,
+     level:s.frais&&s.frais.etat!=='ok'?'todo':undefined,value:s.frais?this.pill(s.frais.etat==='ok'?'ok':'todo',this.freshText(s.frais)):undefined,go:()=>this.go('sources/'+s.id)})),
+    ...(dev&&dev.total?[listRow({label:html`<b>Appareils</b>`,name:'Appareils',sub:`${dev.total} compteur${dev.total>1?'s':''} d’appareil dans la page Énergie`,
+     value:this.pill(dev.repondent===dev.total?'ok':'todo',`${dev.repondent} / ${dev.total}`),go:()=>this.go('appareils')})]:[])]):nothing}
+   ${x?.capacites.length?listSection('Ce qu’Énergie peut calculer',x.capacites.map(c=>listRow({label:c.etat==='non'?html`<span class="off">${c.nom}</span>`:c.nom,name:c.nom,
+     value:c.etat==='ok'?this.pill('ok',c.avec??'Oui'):c.etat==='attend'?this.pill('wait',c.avec??'Bientôt'):html`<span class="off">${c.avec??'Non'}</span>`,
+     go:c.page?()=>this.go(c.page!):undefined})),{help:'Ce que vos compteurs permettent. Une ligne grise dit ce qu’il faudrait en plus ; une ligne « en attente » viendra seule, avec le temps.'}):nothing}
+   ${fixed.length?listSection('Corrigé par Hestia',[moreRow('Écarté ou complété, sans rien changer dans Home Assistant',String(new Set(fixed).size),[...new Set(fixed)].map(f=>listRow({label:f})))]):nothing}
+   ${h.a_ameliorer.length?listSection('Pour aller plus loin',this.todoRows(h.a_ameliorer,false)):nothing}
+   ${listSection('Le calcul',[listRow({label:'Dernier calcul',value:calc?`à ${hm(calc)}${x?.calcul.duree_s!=null?`, en ${num(x.calcul.duree_s,1)} s`:''}`:'—'}),
+    listRow({label:'Historique lu',value:x?.historique?`depuis le ${dayOf(new Date(x.historique.du+'T12:00'))} ${new Date(x.historique.du+'T12:00').getFullYear()}`:'—'}),
+    listRow({label:'Tarifs',value:h.tarifs?`CRE, au ${dayOf(new Date(h.tarifs+'T12:00'))} ${new Date(h.tarifs+'T12:00').getFullYear()}`:'—'})])}`;
  }
  private reviewName(r:{id:string;titre:string}){
   if(r.id==='hier'){const d=new Date();d.setDate(d.getDate()-1);return `Hier, ${DAYS[d.getDay()]}`;}
@@ -250,7 +283,7 @@ export class HestiaEnergySetup extends LitElement {
   const top=list.filter(d=>!d.dans);
   const total=(g:string)=>top.filter(d=>this.group(d)===g).reduce((a,d)=>a+(d.euros??0),0);
   const groups=h.groupes.map(([k])=>k).filter(g=>list.some(d=>this.group(d)===g)).sort((a,b)=>total(b)-total(a));
-  const todo=h.a_regler.filter(t=>t.page==='appareils');
+  const todo=h.a_regler.filter(t=>t.page==='appareils'||t.sur==='appareils');
   return html`${this.head('Appareils',{lead:`${list.length} appareil${list.length>1?'s':''} mesuré${list.length>1?'s':''}${h.appareils.part!=null?` · ${h.appareils.part} % de la maison en ${month}`:''}`,
     help:`Le reste, c’est ce qui n’est pas mesuré : éclairage, box, petits appareils. Les euros sont ceux de ${month}, au prix moyen payé ce mois-là, soleil compris.`})}
    ${listSection('',[this.haRow('Ajouter un appareil','Énergie suit les appareils déclarés dans la page Énergie de Home Assistant.')])}
@@ -370,16 +403,26 @@ export class HestiaEnergySetup extends LitElement {
 
  /* ── Bilan (H9) ── */
  private reviewPage(h:Hub){
-  const ms=this.months;
-  if(!ms||!ms.length)return html`${this.head('Bilan',{lead:'Calcul des 12 derniers mois…'})}`;
+  const ms=this.months,m=h.mois,last=h.mois_an_dernier,month=MONTHS[new Date().getMonth()];
+  // The month so far and the latest reports (on the overview until 20 Nov. 2026, which became technical).
+  const lastYear=last?.euros!=null?`${eur(last.euros)} en ${month} ${new Date().getFullYear()-1}`:null;
+  const now=h.vide?nothing:html`<div class="stats">
+    <div class="stat"><b>${eur(m?.euros)}</b><span>depuis le 1er ${month}</span></div>
+    <div class="stat"><b>${h.projection!=null?'≈ '+eur(h.projection):'—'}</b><span>prévus pour ${month}</span>${lastYear?html`<small>${lastYear}</small>`:nothing}</div>
+    ${h.soleil?html`<div class="stat"><b>${m?.soleil_couvre!=null?m.soleil_couvre+' %':'—'}</b><span>du courant vient du soleil</span></div>`
+     :html`<div class="stat"><b>${eur(h.douze_mois?.euros)}</b><span>sur les 12 derniers mois</span></div>`}</div>
+   ${h.bilans.length?listSection('Les derniers bilans',h.bilans.map(r=>listRow({label:this.reviewName(r),value:html`<span class="money">${eur(r.euros)}</span>`,sub:r.texte})),
+     {more:h.notifie?undefined:html`<button class="linkbtn" @click=${()=>this.go('reglages')}>Les recevoir chaque matin</button>`}):nothing}`;
+  if(!ms||!ms.length)return html`${this.head('Bilan',{lead:'Calcul des 12 derniers mois…'})}${now}`;
   const known=ms.filter(p=>p.euros!=null),total=known.reduce((a,p)=>a+(p.euros??0),0),max=Math.max(1,...known.map(p=>p.euros??0));
   const resale=ms.reduce((a,p)=>a+(p.revendu_euros??0),0),label=(p:Period)=>{const d=new Date(p.debut);return `${cap(MONTHS[d.getMonth()])} ${d.getFullYear()}`;};
-  const first=label(ms[0]).toLowerCase(),last=label(ms[ms.length-1]).toLowerCase(),month=MONTHS[new Date().getMonth()];
+  const first=label(ms[0]).toLowerCase(),final=label(ms[ms.length-1]).toLowerCase();
   const heat=h.chauffage,stove=heat?.poele?.saison,water=h.eau,sun=h.douze_mois?.soleil_couvre;
   const heatRows=[...(heat?.etat==='pret'&&heat.mois?[listRow({label:`Électricité due au froid, depuis le 1er ${month}`,value:eur(heat.mois.eur),sub:`${kwh(heat.mois.kwh)}, estimés d’après le froid de chaque jour.`})]:[]),
    ...(stove?[listRow({label:'Poêle, depuis la rentrée',value:eur(stove.eur),sub:`${num(stove.kg)} kg de granulés.`})]:[])];
-  return html`${this.head('Bilan',{lead:'Les 12 derniers mois, abonnement compris',help:'Calculés avec les chiffres d’Enedis, qui font foi, et le prix de chaque jour. Un jour sans prix connu n’est jamais compté gratuit.'})}
-   ${listSection('',[listRow({label:html`<span class="big">${num(total,0)} €</span>`,sub:`De ${first} à ${last}.${h.soleil&&sun!=null?` Le soleil a fourni ${sun} % de la maison.`:''}${known.length<ms.length?` ${ms.length-known.length} mois sans prix connu.`:''}`,
+  return html`${this.head('Bilan',{lead:'Ce mois-ci et les 12 derniers mois, abonnement compris',help:'Calculés avec les chiffres d’Enedis, qui font foi, et le prix de chaque jour. Un jour sans prix connu n’est jamais compté gratuit.'})}
+   ${now}
+   ${listSection('',[listRow({label:html`<span class="big">${num(total,0)} €</span>`,sub:`De ${first} à ${final}.${h.soleil&&sun!=null?` Le soleil a fourni ${sun} % de la maison.`:''}${known.length<ms.length?` ${ms.length-known.length} mois sans prix connu.`:''}`,
     value:h.soleil&&resale>0?this.pill('benefit',`${num(resale,0)} € de revente`):undefined})])}
    ${listSection('Mois par mois',ms.slice().reverse().map(p=>listRow({label:label(p),sub:h.soleil&&p.soleil_couvre!=null?`Le soleil a couvert ${p.soleil_couvre} %`:undefined,
     value:p.euros==null?'—':html`<span class="mbar"><i style=${`width:${Math.round(p.euros/max*100)}%`}></i></span><span class="money">${num(p.euros,0)} €</span>`})))}

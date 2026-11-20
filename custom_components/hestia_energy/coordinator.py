@@ -13,6 +13,7 @@ import dataclasses
 from datetime import date, datetime, timedelta
 import logging
 import re
+import time
 from zoneinfo import ZoneInfo
 
 from homeassistant.const import EVENT_HOMEASSISTANT_STARTED
@@ -23,7 +24,7 @@ from homeassistant.util import dt as dt_util
 
 from . import hub_view, reader
 from .const import DOMAIN
-from .engine import advice, anomaly, baseline, cards, daily, health, heating, hub, solar, home as engine_home, live, phrases, report, sources, stats, tariff
+from .engine import advice, anomaly, baseline, cards, daily, habits, health, heating, hub, solar, home as engine_home, live, phrases, report, sources, stats, tariff
 from .engine.rows import Rows, merge as merge_rows
 
 _LOGGER = logging.getLogger(__name__)
@@ -109,6 +110,7 @@ class EnergyCoordinator:
         self._last_full: datetime | None = None
         self._live_pending = None
         self._refreshing = asyncio.Lock()
+        self.last_duration: float | None = None
         self._stopped = False
         self._retry = None
         self._failed = False
@@ -291,7 +293,10 @@ class EnergyCoordinator:
             return
         try:
             async with self._refreshing:
+                began = time.monotonic()
                 await self._refresh(full)
+                # How long the last report took, said on the hub's overview (« Le calcul »).
+                self.last_duration = time.monotonic() - began
         except Exception:  # noqa: BLE001 - the brick goes on with its last figures
             if not self._failed:
                 _LOGGER.exception("Hestia Énergie : bilans non refaits, les derniers chiffres restent ; nouvel essai dans 5 min")
@@ -572,6 +577,18 @@ class EnergyCoordinator:
             price = self._price_of("base", now)
         hours_today = _hours(home, local.date())
         nights = _baseloads(home, local.date())
+        findings = [_finding(f, now) for f in [*home.findings, *self._against_reference(self.home_raw or home)]]
+        # « Ton contrat, bien utilisé »: a year hour by hour, made once a day (and again when the home is read anew).
+        key = (local.date(), id(home), self.contract.option, self.offpeak)
+        if getattr(self, "_usage_key", None) != key:
+            self._usage, self._usage_key = habits.usage(home, self.contract, self.table, now, self.device_names), key
+            if self._usage is not None:
+                grid = {(m.power.rate_from, False) if m.power.rate_from else (m.power.rate, m.power.inverted)
+                        for m in self.page.imports if m.power.rate_from or m.power.rate}
+                self._usage["puissance"] = habits.power([(self.rows[e], inv) for e, inv in grid if e in self.rows],
+                                                        self.contract, self.table, now, self.tz)
+        # What « À régler » lists: the card's « Un capteur… » line and the binary sensor say the same, no more.
+        to_mend = hub_view.pending(self, findings)
         # What a kWh of sun kept saves: the daytime price (peak hours, or Base).
         avoided = self._price_of("hp" if self.contract.option == tariff.HPHC else "base", now) if self.contract.option != tariff.TEMPO else None
         channels = {c: self.rows[c] for c in self.extras.get("channels") or [] if self.rows.get(c)}
@@ -599,7 +616,9 @@ class EnergyCoordinator:
                         # what is only supposed, not read (one Linky meter): the cards ask to confirm it in Réglages
                         "a_confirmer": hub_view.contract_supposed(self),
                         **cards.contract_month(home, self.contract, self.table, now, month)},
-            "constats": [_finding(f, now) for f in [*home.findings, *self._against_reference(self.home_raw or home)]],
+            "usage": self._usage,
+            "constats": findings,
+            "a_regler": [{"quoi": f["id"], "stat": f.get("stat")} for f in to_mend],
             "heures": {"aujourdhui": hours_today, "hier": _hours(home, local.date() - timedelta(days=1))},
             "veille_historique": nights,
             "eau": _water(home, now, self.settings.get("water_price")),
@@ -613,10 +632,12 @@ class EnergyCoordinator:
             "douze_mois": hub.twelve_months(home, self.contract, self.table, now),
             "pointe": cards.peak_today(hours_today, kva),
             # Advice « à froid » (engine/daily.py): habits and contract, with the euros a year at stake.
-            "pistes": daily.advices(home, self.contract, self.table, now, self.cold, self.weather_cold == "oui", price,
-                                    report.month(home, self.contract, self.table, local.year - 1, local.month),
-                                    report.projection(month, min(now, known) if known else now)),
-            "a_savoir": self._know(today, yesterday, month, rise, price, self._unusual(home, local), panels),
+            "pistes": _with_devices(
+                daily.advices(home, self.contract, self.table, now, self.cold, self.weather_cold == "oui", price,
+                              report.month(home, self.contract, self.table, local.year - 1, local.month),
+                              report.projection(month, min(now, known) if known else now)),
+                habits.advices(self._usage, self.contract, bool(self.level and self.level.sun))),
+            "a_savoir": self._know(today, yesterday, month, rise, price, self._unusual(home, local), panels, bool(to_mend)),
             "mis_a_jour": now.isoformat(),
         }
 
@@ -681,7 +702,7 @@ class EnergyCoordinator:
         minutes = solar.silent_minutes(state.state, state.last_changed, dt_util.utcnow(), up)
         return minutes if minutes is not None and minutes >= 30 else None
 
-    def _know(self, today, yesterday, month, rise, price, unusual=None, panels=None) -> list[dict]:
+    def _know(self, today, yesterday, month, rise, price, unusual=None, panels=None, to_mend=False) -> list[dict]:
         """« À savoir »: one line per rubric at most, each a sentence of PHRASES.md § 3."""
         lines = []
         if self.offpeak and self.offpeak.ranges:
@@ -707,7 +728,7 @@ class EnergyCoordinator:
                 values["euros"] = phrases.euros(unusual.gap_kwh * per_kwh)
             key = "jour_plus_froid" if unusual.with_cold else "jour_plus"
             lines.append({"rubrique": "surveiller", "id": key, "texte": phrases.know(key, values)})
-        elif any(f.id in phrases.TO_MEND for f in self.home.findings):
+        elif to_mend:
             lines.append({"rubrique": "surveiller", "id": "capteur_douteux", "texte": phrases.know("capteur_douteux", {})})
         if unusual is not None and not unusual.more:
             lines.append({"rubrique": "appris", "id": "jour_moins",
@@ -832,7 +853,7 @@ class EnergyCoordinator:
             export_price=self.contract.export_price if self.contract else None,
             offpeak_price=self._price_of("hc", now) if self.contract and self.contract.option == tariff.HPHC else None,
             water_leak_min=self.flow.minutes(now), water_litres_per_day=self.flow.litres_per_day if self.flow.since else None,
-            watched=watched)
+            watched=watched, heater_gain=habits.heater_gain(self.data.get("usage")))
         banner = self.steady.update(advice.choose(situation), now)
         self._alert(banner)
         price = None
@@ -876,6 +897,14 @@ def _number(state) -> float | None:
 
 def _positive(value: float | None) -> float | None:
     return None if value is None else max(0.0, value)
+
+
+def _with_devices(found: list[dict], devices: list[dict]) -> list[dict]:
+    """The water heater and the machines (maquette D) among the other advices, the most euros first, as
+    daily.advices ranks them: the unusual day (news) stays first."""
+    news = [a for a in found if a["id"] == "jour_inhabituel"]
+    rest = [a for a in found if a["id"] != "jour_inhabituel"] + devices
+    return news + sorted(rest, key=lambda a: -(a.get("euros_an") or 0))
 
 
 def _level(level: sources.Level | None) -> dict:

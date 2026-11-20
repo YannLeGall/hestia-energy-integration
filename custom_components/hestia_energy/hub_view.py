@@ -5,10 +5,13 @@ rule, under 0.25 s), nothing computed again. The sentences are the hub's own (H2
 """
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime, timedelta
+
+from homeassistant.const import STATE_UNAVAILABLE
+from homeassistant.util import dt as dt_util
 
 from . import reader
-from .engine import hub, phrases, sources, tariff
+from .engine import heating, hub, phrases, sources, tariff
 
 # The extensions (H8): the other bricks first, then by theme. [key, group, name, what it brings, what happens without it
 # (said without « Sans elle / Sans lui » : the page gives the title, Frank 9 Nov. 2026), link]
@@ -33,6 +36,10 @@ EXTENSIONS = (
      "Le poêle n’est pas compté.", None),
 )
 RUNNING_W = 50
+# The overview says a source « en retard » past these (Frank, 20 Nov. 2026, the technical overview): a meter of Home
+# Assistant reports at least every few hours even when nothing flows; Enedis sends yesterday the next day.
+LATE_ENTITY = timedelta(hours=6)
+LATE_EXTERNAL = timedelta(days=3)
 # What keeps Hestia Weather from giving the cold of each day, by the state found (coordinator._follow_weather and
 # _heating): [title, what to do]. Said in « À régler » and on Hestia Météo's page, never left silent.
 WEATHER_PROBLEMS = {
@@ -118,6 +125,47 @@ def mend(f: dict, page) -> bool:
     return not (f["id"] == "p_sans_statistiques" and page is not None and hub.owner(f, page) != f.get("stat"))
 
 
+def pending(c, findings: list[dict]) -> list[dict]:
+    """The findings the household still has to mend, as « À régler » lists them: not a live power without statistics
+    (see mend), not the stove declared in gas once the household said what it burns (prod, 19 Nov. 2026: both kept
+    « Un capteur ne répond plus » on the card and « Donnée douteuse » on for good)."""
+    answered = c.settings.get("stove_fuel") is not None
+    return [f for f in findings if mend(f, c.page) and not (f["id"] == "p_fausse_source" and answered)]
+
+
+def _double(hass, c, values: dict) -> dict:
+    """« Un compteur compte double »: the last such day in figures, then the meter to look at, and a way to mend it.
+    Opens the page Énergie of Home Assistant, where a device is declared (and « en amont » is said); stays listed on
+    the tab's « Appareils » page (« sur »)."""
+    n = values.get("jours", 0)
+    last = values.get("dernier")
+    when = "Un jour"
+    if isinstance(last, str):
+        try:
+            d = date.fromisoformat(last)
+            when = f"Le {d.day if d.day > 1 else '1er'} {phrases.month_name(d.month)}"
+        except ValueError:
+            pass
+    house, devices = values.get("maison_kwh"), values.get("appareils_kwh")
+    text = when + (f", les appareils mesurés ont compté {phrases.number(devices, 1)} kWh pour une maison à "
+                   f"{phrases.number(house, 1)} kWh" if house is not None and devices is not None else
+                   ", les appareils mesurés ont dépassé la maison entière")
+    text += f" ({n} jours en tout). " if n > 1 else ". "
+    twins = values.get("doublon")
+    heavy = values.get("plus_gros") or []
+    if twins and len(twins) == 2:
+        a, b = (_meter_name(hass, c, s) for s in twins)
+        text += f"{a} et {b} comptent presque pareil : sans doute le même appareil déclaré deux fois. Retirez-en un dans la page Énergie."
+    elif heavy:
+        names = [_meter_name(hass, c, s) for s in heavy]
+        listed = names[0] if len(names) == 1 else ", ".join(names[:-1]) + " ou " + names[-1]
+        text += (f"À regarder d'abord : {listed}. Une prise mesurée derrière une autre se dit dans la page Énergie, "
+                 "avec « Consommation en amont ».")
+    else:
+        text += "Souvent une prise mesurée derrière une autre, ou un appareil déclaré deux fois."
+    return {"titre": "Un compteur compte double", "page": "ha", "sur": "appareils", "texte": text}
+
+
 def todos(hass, c) -> list[dict]:
     """What only the household can mend, each with its probable cause and the page where it is mended."""
     out: list[dict] = []
@@ -138,10 +186,7 @@ def todos(hass, c) -> list[dict]:
                             "page": "sources/poele"})
             continue
         if f["id"] == "p_somme_impossible":
-            n = values.get("jours", 0)
-            out.append({"titre": "Un compteur compte double", "page": "appareils",
-                        "texte": f"{n} jour{'s' if n > 1 else ''}, les appareils ont dépassé la maison entière. Souvent une prise "
-                                 "mesurée derrière une autre, ou un appareil déclaré deux fois."})
+            out.append(_double(hass, c, values))
             continue
         if (f["id"], stat) in seen:
             continue
@@ -229,6 +274,30 @@ def _enedis(meter) -> dict | None:
             "entite": meter.stat}
 
 
+def freshness(hass, c, ids: list[str]) -> dict:
+    """When a source last spoke, from its entities' last report (or, for Enedis's statistics, their last hour).
+    « ok », « retard » (nothing for a while) or « muet » (every entity unavailable)."""
+    now = dt_util.utcnow()
+    seen: datetime | None = None
+    states = [hass.states.get(i) for i in ids if "." in i and ":" not in i]
+    states = [s for s in states if s is not None]
+    for st in states:
+        if st.state != STATE_UNAVAILABLE:
+            at = getattr(st, "last_reported", None) or st.last_updated
+            seen = at if seen is None or at > seen else seen
+    external = [i for i in ids if ":" in i]
+    for i in external:
+        rows = (c.rows or {}).get(i)
+        if rows is not None and len(rows):
+            at = datetime.fromtimestamp(rows.ts[-1], tz=dt_util.UTC) + timedelta(hours=1)
+            seen = at if seen is None or at > seen else seen
+    if states and all(st.state == STATE_UNAVAILABLE for st in states) and not external:
+        return {"etat": "muet", "vu": None}
+    limit = LATE_ENTITY if states else LATE_EXTERNAL
+    late = seen is None or now - seen > limit
+    return {"etat": "retard" if late else "ok", "vu": None if seen is None else seen.isoformat()}
+
+
 def build_sources(hass, c) -> list[dict]:
     d, page = c.data, c.page
     if page is None:
@@ -247,9 +316,11 @@ def build_sources(hass, c) -> list[dict]:
 
     def add(key: str, group: str, name: str, use: str, meters: list, origin: list, chips: list, **more) -> None:
         stats_ = [m.stat for m in meters]
+        ids = [*stats_, *(e for m in meters for e in m.power.entities), *(o["entite"] for o in origin if o and o.get("entite"))]
         out.append({"id": key, "groupe": group, "nom": name, "usage": use, "chiffres": [x for x in chips if x and x.get("texte")],
                     "origine": [o for o in origin if o], "corrige": more.pop("corrige", fixed(stats_)),
-                    "etat": "todo" if f"sources/{key}" in todo_pages else "ok", **more})
+                    "etat": "todo" if f"sources/{key}" in todo_pages else "ok", "frais": freshness(hass, c, list(dict.fromkeys(ids))),
+                    **more})
 
     live = bool(c.level and c.level.live)
     if page.imports:
@@ -404,6 +475,78 @@ def build_extensions(hass, c, devices: list[dict]) -> list[dict]:
     return out
 
 
+# --- The technical overview (Frank, 20 Nov. 2026): what Énergie reads, what it can work out, and whether it all runs ----
+
+def _history(c) -> dict | None:
+    """How far back the bought energy is read (a year at most)."""
+    page = c.page
+    if page is None:
+        return None
+    ids = [*c.reference.values(), *(m.stat for m in page.imports)]
+    firsts = [rows.ts[0] for i in ids if (rows := (c.rows or {}).get(i)) is not None and len(rows)]
+    if not firsts:
+        return None
+    first = datetime.fromtimestamp(min(firsts), tz=dt_util.UTC)
+    return {"du": first.date().isoformat(), "jours": min(365, (dt_util.utcnow() - first).days)}
+
+
+def _abilities(hass, c, devices: list[dict]) -> list[dict]:
+    """What Énergie can work out with what the home has: « ok », « attend » (it will, with time) or « non » (it needs
+    something more), each with a few words why."""
+    d, level, page = c.data, c.level, c.page
+    if page is None or page.empty or level is None:
+        return []
+    out = []
+
+    def add(key: str, name: str, state: str, why: str | None, go: str | None = None) -> None:
+        out.append({"id": key, "nom": name, "etat": state, "avec": why, "page": go})
+
+    add("euros", "Les euros, jour par jour", "ok" if level.bill else "non",
+        "calés sur Enedis" if c.reference or any(_enedis(m) for m in page.imports) else "d’après la page Énergie")
+    add("direct", "En direct : le prix de l’heure, la pointe", "ok" if level.live else "non",
+        "compteur en direct" if level.live else "il faut un compteur en direct", None if level.live else "extensions/tic")
+    n = len(devices)
+    add("appareils", "Appareil par appareil", "ok" if level.devices else "non",
+        f"{n} appareil{'s' if n > 1 else ''}" if level.devices else "aucune prise mesurée", "appareils" if level.devices else None)
+    add("soleil", "Le soleil et la revente", "ok" if level.sun else "non",
+        f"{len(page.solar)} compteur{'s' if len(page.solar) > 1 else ''}" if level.sun else "pas de panneaux")
+    if page.water:
+        add("eau", "L’eau et la fuite", "ok", "débit lu" if any(m.power.rate for m in page.water) else "compteur")
+    else:
+        add("eau", "L’eau et la fuite", "non", "pas de compteur d’eau")
+    night = d.get("veille")
+    if night:
+        add("veille", "Ce qui tourne la nuit", "ok", f"{night.get('nuits')} nuits")
+    elif not level.hourly:
+        add("veille", "Ce qui tourne la nuit", "non", "il faut la consommation heure par heure")
+    else:
+        add("veille", "Ce qui tourne la nuit", "attend", "après 7 nuits")
+    heat = d.get("chauffage") or {}
+    state = heat.get("etat")
+    if state == "pret":
+        add("chauffage", "Le chauffage selon le froid", "ok", "avec Hestia Weather")
+    elif state == "apprend":
+        add("chauffage", "Le chauffage selon le froid", "attend",
+            f"en apprentissage : {heat.get('jours') or 0} jours sur {heating.MIN_DAYS}")
+    elif state == "peu_lie":
+        add("chauffage", "Le chauffage selon le froid", "non", "la maison se chauffe surtout autrement")
+    else:
+        add("chauffage", "Le chauffage selon le froid", "non", "il faut Hestia Weather", "extensions/meteo")
+    contract = c.contract
+    if contract is not None and contract.option == tariff.TEMPO:
+        found = bool(c.extras.get("tempo_today"))
+        add("tempo", "La couleur Tempo", "ok" if found else "non", "RTE Tempo" if found else "il faut RTE Tempo",
+            None if found else "extensions/tempo")
+    return out
+
+
+def technical(hass, c, devices: list[dict]) -> dict:
+    responding = [x for x in devices if (st := hass.states.get(x["stat"])) is None or st.state != STATE_UNAVAILABLE]
+    return {"historique": _history(c), "capacites": _abilities(hass, c, devices),
+            "calcul": {"a": c.data.get("mis_a_jour"), "duree_s": None if c.last_duration is None else round(c.last_duration, 1)},
+            "appareils": {"total": len(devices), "repondent": len(responding)}}
+
+
 # --- The whole tab ----------------------------------------------------------------------------------------------------
 
 def build(hass, c) -> dict:
@@ -423,6 +566,7 @@ def build(hass, c) -> dict:
         "chauffage": d.get("chauffage"), "eau": d.get("eau"),
         "sources": build_sources(hass, c), "appareils": devices,
         "extensions": build_extensions(hass, c, devices["liste"]),
+        "technique": technical(hass, c, devices["liste"]),
         "groupes": [[k, hub.GROUP_NAMES[k]] for k in hub.GROUPS],
         "mis_a_jour": d.get("mis_a_jour"), "tarifs": (c.table or {}).get("version"),
         "notifie": bool(c.settings.get("notify_service")),

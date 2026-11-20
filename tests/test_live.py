@@ -1,9 +1,11 @@
 """The live arbiter on a real snapshot of Frank's home (7 Nov. 2026, 13 h 15): A5 problems 2 and 5."""
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 import unittest
 
 from replay import live_snapshot
-from engine.live import Candidate, Flow, judge
+from engine.live import Candidate, Flow, Reading, judge
+
+NOW = datetime(2026, 11, 19, 19, 40, tzinfo=timezone.utc)
 
 
 class Production(unittest.TestCase):
@@ -33,6 +35,38 @@ class Production(unittest.TestCase):
         verdict = judge("production", [opendtu], self.now + timedelta(minutes=20))
         self.assertIsNone(verdict.chosen)
         self.assertEqual(verdict.set_aside[0][1], "muet")
+
+
+class SumOfMeters(unittest.TestCase):
+    """A source made of several meters (no real data needed: these run on GitHub too)."""
+
+    def test_a_meter_at_rest_does_not_silence_the_sum(self):
+        # Labo, 19 Nov. 2026: bought = peak-hours meter + off-peak meter. In peak hours the off-peak meter stays at 0 W
+        # and reports nothing more; the peak-hours one reports every 15 s. The sum is alive.
+        later = NOW + timedelta(minutes=20)
+        peak = Reading("sensor.peak", "496", "W", later - timedelta(seconds=10), later - timedelta(seconds=10))
+        rest = Reading("sensor.offpeak", "0", "W", NOW, NOW)
+        verdict = judge("achat", [Candidate("Page Énergie", [(peak, 1), (rest, 1)])], later)
+        self.assertEqual(verdict.value, 496)
+
+    def test_a_working_meter_that_stops_still_silences_the_sum(self):
+        later = NOW + timedelta(minutes=20)
+        peak = Reading("sensor.peak", "496", "W", NOW, NOW)
+        rest = Reading("sensor.offpeak", "0", "W", later, later)
+        verdict = judge("achat", [Candidate("Page Énergie", [(peak, 1), (rest, 1)])], later)
+        self.assertIsNone(verdict.chosen)
+        self.assertEqual(verdict.set_aside[0][1], "muet")
+
+
+    def test_panels_at_rest_at_night_are_not_silent(self):
+        # Home, 19 Nov. 2026, 23 h: the three solar meters at 0 W, last reported at sunset. Nothing is wrong.
+        later = NOW + timedelta(hours=3)
+        panels = [Reading(f"sensor.panneaux_{n}", "0", "W", NOW, NOW) for n in ("est", "sud", "ouest")]
+        inverter = Reading("sensor.opendtu_ac_power", "0.0", "W", NOW, NOW)
+        verdict = judge("soleil", [Candidate("Page Énergie", [(r, 1) for r in panels]),
+                                   Candidate("OpenDTU", [(inverter, 1)], local=True)], later)
+        self.assertEqual(verdict.value, 0)
+        self.assertNotIn("muet", [why for _, why, _ in verdict.set_aside])
 
 
 class Water(unittest.TestCase):

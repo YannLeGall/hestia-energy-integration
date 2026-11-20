@@ -29,10 +29,10 @@ def _peak(d: dict) -> bool | None:
 
 
 def _doubtful(d: dict) -> list[dict]:
-    """What the panel lists as doubtful: the findings of the reports and the sources set aside live."""
+    """What the panel lists as doubtful: what « À régler » lists, and the sources set aside live."""
     live = [{"quoi": e["source"], "raison": e["raison"]} for v in (_direct(d).get("sources") or {}).values()
             for e in v.get("ecartes", []) if e["raison"] in ("fige", "muet", "indisponible")]
-    return [{"quoi": c["id"], "stat": c["stat"]} for c in d.get("constats") or [] if c.get("niveau") == "regler"] + live
+    return list(d.get("a_regler") or []) + live
 
 
 BINARIES = (
