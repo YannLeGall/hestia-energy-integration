@@ -2,7 +2,7 @@
 
 ### Améliorations
 
-- « Pour économiser » : les frises se lisent d'un coup d'œil. Elles montrent seulement les heures où l'appareil tourne vraiment, en blocs d'une seule couleur (rouge en heures pleines, bleu en heures creuses, jaune au soleil), et une légende les explique en haut de la liste.
+- « Pour économiser » : les frises se lisent d'un coup d'œil. Elles montrent seulement les heures où l'appareil tourne vraiment, en blocs d'une seule couleur (rouge en heures pleines, bleu en heures creuses, jaune au soleil), et sous chaque frise, une ligne dit en mots ce que montre chaque trait : « Il tourne : 11 h – 15 h, heures pleines », « À lancer : 0 h – 3 h, heures creuses ».
 - « En ce moment » ne liste plus ce qui est en marche : la carte Appareils le dit déjà.
 
 ## 1.0.0b3 — Pour économiser, en trois temps

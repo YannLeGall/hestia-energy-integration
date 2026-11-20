@@ -57,6 +57,8 @@ const RUBRICS=['soleil','chauffage','veille','eau','appareils','pointe','contrat
 /** Advice « à froid » (maquette des cartes 3): a gesture, why, and the euros at stake a year or a winter. */
 type Piste={id:string;titre:string;pourquoi:string;euros_an:number|null;unite:string|null;rubrique:string|null;
  nom?:string;maintenant?:string;mieux?:string;gain?:number;sous?:string;profil?:[number,number,number][];mieux_heures?:[number,number,string][]};
+/** What a coloured block of a strip means, said under it. */
+const HOURS_SAY:Record<string,string>={'--nw-peak':'heures pleines','--nw-cold':'heures creuses','--nw-sun':'au soleil'};
 const PISTE_LOOK:Record<string,[string,string]>={veille_haute:['moon','--nw-watch'],chauffage_degre:['flame','--nw-heat'],contrat_base:['doc','--nw-ok'],
  jour_inhabituel:['home','--nw-home'],budget_mois:['doc','--nw-home'],chauffe_eau_heures:['drop','--nw-cold'],machine_heures:['clock','--nw-home']};
 type Rubric=typeof RUBRICS[number];
@@ -243,7 +245,7 @@ class HestiaEnergyCard extends LitElement {
     <div class="nw-band-text"><p class="nw-band-kicker">En ce moment</p><p class="nw-band-title">${b.titre}</p>${b.pourquoi||this._periodSay(v)?html`<p class="nw-band-line">${b.pourquoi||this._periodSay(v)}</p>`:nothing}</div></div></div>`:nothing)}
    <div class="periods${secs.length===2?' two':''}">${secs}</div>
    ${v.usage?this._section('usage','Votre contrat, bien utilisé','sur 12 mois',this._usage(v)):nothing}
-   ${v.pistes?.length?this._section('save','Pour économiser','sur 12 mois, en euros',html`${v.pistes.slice(0,6).some(p=>p.profil||p.mieux_heures)?html`<div class="hrs-key"><span>Sur les frises, quand l'appareil tourne :</span><span style="--h:var(--nw-peak)"><i></i>heures pleines</span><span style="--h:var(--nw-cold)"><i></i>heures creuses</span><span style="--h:var(--nw-sun)"><i></i>au soleil</span></div>`:nothing}<div class="pistes better">${v.pistes.slice(0,6).map(p=>p.maintenant?this._better(p):this._piste(p))}</div>`):nothing}
+   ${v.pistes?.length?this._section('save','Pour économiser','sur 12 mois, en euros',html`<div class="pistes better">${v.pistes.slice(0,6).map(p=>p.maintenant?this._better(p):this._piste(p))}</div>`):nothing}
    ${this._section('more','En détail','touchez pour ouvrir',html`<div class="more">${this._goes(v)}</div>`)}
   </ha-card>`;
  }
@@ -516,19 +518,22 @@ class HestiaEnergyCard extends LitElement {
      of what paid most of it. One flat colour per price, no shades: Frank could not read the 24 shaded squares (20 Nov.). */
  private _hoursNow(profil:[number,number,number][]){
   const top=Math.max(...profil.map(h=>h[0]+h[1]+h[2]),1e-9),col=['--nw-sun','--nw-cold','--nw-peak'];
-  return this._hours(profil.map(h=>{const t=h[0]+h[1]+h[2];return t<top*.25?null:col[h.indexOf(Math.max(...h))];}));
+  return this._hours(profil.map(h=>{const t=h[0]+h[1]+h[2];return t<top*.25?null:col[h.indexOf(Math.max(...h))];}),'Il tourne');
  }
  private _hoursBetter(spans:[number,number,string][]){
   const cells:(string|null)[]=Array(24).fill(null);
   for(const [a,b,what] of spans)for(let h=a;h<b;h++)cells[h%24]=what==='soleil'?'--nw-sun':'--nw-cold';
-  return this._hours(cells);
+  return this._hours(cells,'À lancer');
  }
- /** A 24-hour line with the running hours drawn as blocks (neighbour hours of the same colour joined), and ticks every 6 h. */
- private _hours(cells:(string|null)[]){
+ /** A 24-hour line with the running hours drawn as blocks (neighbour hours of the same colour joined), ticks every 6 h,
+     and under it, in words, what each block is: its hours and its price (Frank, 20 Nov.: « pourquoi un trait, pourquoi
+     cette couleur ? »). */
+ private _hours(cells:(string|null)[],lead:string){
   const blocks:[number,number,string][]=[];
   cells.forEach((c,h)=>{if(!c)return;const last=blocks[blocks.length-1];if(last&&last[1]===h&&last[2]===c)last[1]=h+1;else blocks.push([h,h+1,c]);});
   return html`<span class="hrs" aria-hidden="true"><span class="hrs-b">${[6,12,18].map(h=>html`<em style="left:${h/24*100}%"></em>`)}${blocks.map(([a,b,c])=>html`<i style="--h:var(${c});left:${(a/24*100).toFixed(3)}%;width:${((b-a)/24*100).toFixed(3)}%"></i>`)}</span>
-   <span class="hrs-x"><span>0 h</span><span>6 h</span><span>12 h</span><span>18 h</span><span>24 h</span></span></span>`;
+   <span class="hrs-x"><span>0 h</span><span>6 h</span><span>12 h</span><span>18 h</span><span>24 h</span></span>
+   ${blocks.length?html`<span class="hrs-say">${lead}\u00a0:${blocks.map(([a,b,c])=>html`<span style="--h:var(${c})"><i></i>${a}\u00a0h\u00a0–\u00a0${b}\u00a0h, ${HOURS_SAY[c]??''}</span>`)}</span>`:nothing}</span>`;
  }
  private _piste(p:Piste){
   const [ic,c]=PISTE_LOOK[p.id]??['home','--nw-home'],key=p.rubrique&&(RUBRICS as readonly string[]).includes(p.rubrique)?p.rubrique as Rubric:undefined;
