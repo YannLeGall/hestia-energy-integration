@@ -1,3 +1,20 @@
+## 1.0.0b8 — Les offres à plusieurs registres, le week-end en heures creuses
+
+### Nouveautés
+
+- Le week-end et les jours fériés en heures creuses toute la journée (Enercoop « 2 saisons », par exemple). Hestia le voit seule sur les compteurs, ou on le choisit dans Réglages. Les onze jours fériés français sont connus. L’heure de la fin des heures creuses est alors juste le samedi (« lundi à 7 h »).
+- Une action `hestia_energy.set_settings` pour régler le contrat depuis une automatisation : heures creuses, week-end, prix, option. Utile pour suivre les saisons d’une offre qu’Hestia ne connaît pas.
+
+### Corrections
+
+- Les offres avec un registre du Linky par saison et par période (comme Enercoop « 2 saisons » avec ses jours de pointe) : chaque registre garde son prix. Avant, Énergie ne gardait qu’un prix d’heures pleines et un d’heures creuses, ceux du dernier registre lu : en hiver, le prix d’été en heures creuses et le prix de pointe en heures pleines. Les euros des jours passés et le prix du moment sont maintenant justes.
+- Le prix du moment et la période en cours suivent le registre qui compte en ce moment, et le libellé du Linky « H CREUSE HIVER », « H POINTE »… est maintenant reconnu.
+- Les heures creuses apprises lisent tous les registres d’une période, pas seulement le premier.
+
+### Documentation
+
+- La page du contrat explique comment sont comptés les jours passés quand la page Énergie a un compteur par période.
+
 ## 1.0.0b7 — Une nouvelle page d’accueil Hestia-FB
 
 ### Améliorations

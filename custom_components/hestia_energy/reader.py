@@ -96,18 +96,18 @@ async def hourly(hass: HomeAssistant, ids: set[str], start: datetime, end: datet
 
 # --- What the home has besides the Energy page (extensions, F1, 8.3) --------------------------------------------
 
-_PERIOD_STATE = re.compile(r"^(heures? (pleines?|creuses?)|h[pc](\b|\.\.))", re.I)
+_PERIOD_STATE = re.compile(r"^(heures? (pleines?|creuses?|pointe)|h (pleines?|creuses?|pointe)\b|h[pc](\b|\.\.))", re.I)
 _TEMPO = re.compile(r"tempo", re.I)
 _COLOURS = {"bleu": "bleu", "blue": "bleu", "blanc": "blanc", "white": "blanc", "rouge": "rouge", "red": "rouge"}
 _KVA = re.compile(r"(\d{1,2}) ?kva", re.I)
 
 
 def period_of(state: str | None) -> str | None:
-    """« HEURE PLEINE », « HC.. », « heures creuses » → « hp » / « hc »."""
+    """« HEURE PLEINE », « HC.. », « heures creuses », « H POINTE » → « hp » / « hc »."""
     text = (state or "").strip().lower()
     if "creuse" in text or text.startswith("hc"):
         return "hc"
-    if "pleine" in text or text.startswith("hp"):
+    if "pleine" in text or "pointe" in text or text.startswith("hp"):
         return "hp"
     return None
 

@@ -12,6 +12,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import date, datetime, time, timedelta, tzinfo
+from functools import lru_cache
 import json
 from pathlib import Path
 
@@ -94,6 +95,32 @@ class Range:
         return (self.end - self.start) % 1440
 
 
+# Weekends and public holidays: some offers (Enercoop « 2 saisons », issue 18) are off-peak all day long.
+WEEKEND_ALL, WEEKEND_SAME = "tout", "pareil"
+
+
+@lru_cache(maxsize=32)
+def holidays(year: int) -> frozenset[date]:
+    """The eleven French public holidays of a year, Easter worked out (anonymous Gregorian algorithm)."""
+    a, b, c = year % 19, year // 100, year % 100
+    d, e = b // 4, b % 4
+    g = (8 * b + 13) // 25
+    h = (19 * a + b - d - g + 15) % 30
+    i, k = c // 4, c % 4
+    l = (32 + 2 * e + 2 * i - h - k) % 7
+    m = (a + 11 * h + 19 * l) // 433
+    month = (h + l - 7 * m + 90) // 25
+    easter = date(year, month, (h + l - 7 * m + 33 * month + 19) % 32)
+    fixed = [(1, 1), (5, 1), (5, 8), (7, 14), (8, 15), (11, 1), (11, 11), (12, 25)]
+    return frozenset([date(year, mo, da) for mo, da in fixed]
+                     + [easter + timedelta(days=n) for n in (1, 39, 50)])  # Easter Monday, Ascension, Whit Monday
+
+
+def rest_day(day: date) -> bool:
+    """Saturday, Sunday or a French public holiday."""
+    return day.weekday() >= 5 or day in holidays(day.year)
+
+
 def parse_offpeak(text: str | None) -> OffPeak | None:
     """The off-peak hours the household typed (« 22:00-06:00 », « 1:30-7:30, 12:30-14:30 »), or None."""
     import re
@@ -118,10 +145,24 @@ class OffPeak:
     source: str               # « compteur » (read on the TIC), « appris » (learned from the meters), « réglage », « table »
     days: int = 0             # days the learning used
     shares: tuple[float, ...] = ()  # learned: the off-peak share of each local hour, 0 to 23
+    # Weekends and public holidays off-peak all day (issue 18); else the same hours every day.
+    weekend_all: bool = False
 
     def contains(self, at: datetime, tz: tzinfo) -> bool:
         local = at.astimezone(tz)
+        if self.weekend_all and rest_day(local.date()):
+            return True
         return any(r.contains(local.hour * 60 + local.minute) for r in self.ranges)
+
+
+def with_weekend(offpeak: OffPeak | None, choice: str | None, found: OffPeak | None = None) -> OffPeak | None:
+    """The household's choice for weekends and holidays (« tout », « pareil »); None: what the meters showed."""
+    if offpeak is None:
+        return None
+    weekend_all = choice == WEEKEND_ALL if choice in (WEEKEND_ALL, WEEKEND_SAME) else bool(found and found.weekend_all)
+    if weekend_all == offpeak.weekend_all:
+        return offpeak
+    return OffPeak(offpeak.ranges, offpeak.source, offpeak.days, offpeak.shares, weekend_all)
 
 
 # Below this share an hour is peak, above (1 - it) off-peak; between, the cut is inside the hour.
@@ -132,22 +173,32 @@ def learn_offpeak(peak: Series, offpeak: Series, tz: tzinfo, end: datetime | Non
     """The off-peak hours as the two meters show them over the last `days` days (F1.5, lot 3.4).
 
     None when the meters do not show it: fewer than 7 days, or no clear off-peak hour.
+    Weekends and public holidays off-peak all day long (issue 18) are found apart: the hours are then learned on the
+    working days only. Otherwise every day counts, as before.
     """
     end = end or max((h.start for h in [*peak.hours, *offpeak.hours]), default=None)
     if end is None:
         return None
     start = end - timedelta(days=days)
-    energy = [[0.0, 0.0] for _ in range(24)]
+    # [peak, off-peak] energy of each local hour, on working days and on rest days
+    work = [[0.0, 0.0] for _ in range(24)]
+    rest = [[0.0, 0.0] for _ in range(24)]
     seen: set[date] = set()
     for index, series in ((0, peak), (1, offpeak)):
         for hour in series.hours:
             if hour.kwh is None or hour.hours != 1 or not (start < hour.start <= end):
                 continue
             local = hour.start.astimezone(tz)
-            energy[local.hour][index] += hour.kwh
+            (rest if rest_day(local.date()) else work)[local.hour][index] += hour.kwh
             seen.add(local.date())
     if len(seen) < 7:
         return None
+    rest_days = sum(1 for d in seen if rest_day(d))
+    rest_shares = [(hc / (hp + hc)) if hp + hc > 0 else None for hp, hc in rest]
+    # Every hour of the rest days off-peak (a few hours without energy allowed), on at least two of them.
+    weekend_all = (rest_days >= 2 and len(seen) - rest_days >= 5 and sum(s is not None for s in rest_shares) >= 20
+                   and all(s is None or s >= 1 - _EDGE for s in rest_shares))
+    energy = work if weekend_all else [[w[0] + r[0], w[1] + r[1]] for w, r in zip(work, rest)]
     shares = tuple((hc / (hp + hc)) if hp + hc > 0 else None for hp, hc in energy)
     full = [s is not None and s >= 1 - _EDGE for s in shares]
     if not any(full):
@@ -163,7 +214,7 @@ def learn_offpeak(peak: Series, offpeak: Series, tz: tzinfo, end: datetime | Non
         begin = first * 60 - (round(before * 60) if before and before > _EDGE else 0)
         finish = (last + 1) * 60 + (round(after * 60) if after and after > _EDGE else 0)
         ranges.append(Range(begin % 1440, finish % 1440))
-    return OffPeak(tuple(ranges), "appris", len(seen), tuple(0.0 if s is None else round(s, 3) for s in shares))
+    return OffPeak(tuple(ranges), "appris", len(seen), tuple(0.0 if s is None else round(s, 3) for s in shares), weekend_all)
 
 
 def next_change(offpeak: OffPeak | None, at: datetime, tz: tzinfo) -> tuple[datetime, str] | None:
@@ -172,7 +223,8 @@ def next_change(offpeak: OffPeak | None, at: datetime, tz: tzinfo) -> tuple[date
         return None
     local = at.astimezone(tz).replace(second=0, microsecond=0)
     now_in = offpeak.contains(local, tz)
-    for step in range(1, 2 * 1440 + 1):
+    # Five days: a weekend off-peak all day next to a holiday runs from Friday to Tuesday morning.
+    for step in range(1, (5 if offpeak.weekend_all else 2) * 1440 + 1):
         moment = local + timedelta(minutes=step)
         if offpeak.contains(moment, tz) != now_in:
             return moment, (HP if now_in else HC)
@@ -196,6 +248,10 @@ class Contract:
     colors: dict = field(default_factory=dict)
     # A home that sends its surplus to the grid pays the « majoration auto-producteur » (CRE, 9,60 € HT a year).
     self_producer: bool = False
+    # The price of each meter, by its statistic, when the page has several meters for one period (issue 18: a Linky
+    # with a register per season and one for the peak days, each with its own price on the Energy page). A meter only
+    # counts its own period, so its energy takes its own price, never the one of another register of that period.
+    meter_prices: dict = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -233,6 +289,7 @@ def cost(contract: Contract, table: dict, tz: tzinfo, metered: list[tuple[Series
 
     `metered`: each import meter and the period it counts (« hp », « hc »), or None when it counts everything.
     `colors`: the Tempo colour of each Tempo day ({date: « bleu »…}); a Tempo day runs from 6 h to 6 h.
+    A meter with its own price (`Contract.meter_prices`) is counted at that price.
     """
     eur, unknown_kwh, unknown_hours = 0.0, 0.0, 0
     for series, period in metered:
@@ -247,7 +304,9 @@ def cost(contract: Contract, table: dict, tz: tzinfo, metered: list[tuple[Series
             color = None
             if colors is not None:
                 color = colors.get((hour.start.astimezone(tz) - timedelta(hours=6)).date())
-            price = price_at(contract, table, hour.start, tz, period, color)
+            price = contract.meter_prices.get(series.stat)
+            if price is None:
+                price = price_at(contract, table, hour.start, tz, period, color)
             if price is None:
                 unknown_kwh += hour.kwh
             else:

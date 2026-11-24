@@ -7,7 +7,7 @@ from .const import API_KEY, DOMAIN
 from .coordinator import EnergyCoordinator
 from .panel import CARD_URL, async_setup_panel
 from .socle import async_remove_card
-from .websocket import async_setup_websocket
+from .websocket import async_setup_services, async_setup_websocket
 
 PLATFORMS = [Platform.SENSOR, Platform.BINARY_SENSOR]
 CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
@@ -17,6 +17,7 @@ async def async_setup(hass, config):
     # What Hestia Energy publishes for the other bricks (INTERFACE.md § 1.1): there from the start, empty until ready.
     hass.data.setdefault(API_KEY, HestiaEnergyApi(hass))
     async_setup_websocket(hass)
+    async_setup_services(hass)
     await async_setup_panel(hass)
     return True
 

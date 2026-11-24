@@ -25,12 +25,12 @@ type Hub={pret:boolean;soleil:boolean;direct:boolean;vide:boolean;a_regler:Todo[
  eau:{mois_l:number;mois_euros:number|null}|null;sources:Source[];appareils:{liste:Device[];mois:string|null;part:number|null};extensions:Ext[];groupes:[string,string][];
  tarifs:string|null;notifie:boolean;mis_a_jour?:string;technique?:Tech;pistes:{id:string;titre:string;pourquoi:string;euros_an:number|null;unite:string|null}[]};
 type Found<V>={valeur:V|null;source:string|null};
-type Settings={reglages:Record<string,unknown>;trouve:{option:Found<string>;offpeak:Found<[string,string][]>;kva:Found<number>;offer:Found<string>;
+type Settings={reglages:Record<string,unknown>;trouve:{option:Found<string>;offpeak:Found<[string,string][]>;offpeak_weekend?:Found<string>;kva:Found<number>;offer:Found<string>;
  tarif_bleu:{hp?:number|null;hc?:number|null;base?:number|null;abonnement:number|null};prix_page:Record<string,number>;export_price:Found<number>;water_price:Found<number>;
  margin:Found<number>;sac_kg:number|null;notify:{id:string;nom:string}[];a:{revente:boolean;eau:boolean;poele:boolean;delestage:boolean;un_compteur:boolean}}};
 
 const REPO='https://github.com/hestiaFB/hestia-energy-integration';
-const VERSION='1.0.0b7';
+const VERSION='1.0.0b8';
 const HA_ENERGY='/config/energy';
 const MONTHS=['janvier','février','mars','avril','mai','juin','juillet','août','septembre','octobre','novembre','décembre'];
 const DAYS=['dimanche','lundi','mardi','mercredi','jeudi','vendredi','samedi'];
@@ -325,6 +325,7 @@ export class HestiaEnergySetup extends LitElement {
   const offer=this.val<string|null>('offer')??f.offer.valeur??'bleu',bleu=f.tarif_bleu,page=f.prix_page;
   const hc=parseHc(this.val('offpeak'))??f.offpeak.valeur;
   const setHc=(l:[string,string][])=>this.set('offpeak',hcText(l));
+  const wk=this.val<string|null>('offpeak_weekend')??f.offpeak_weekend?.valeur??'pareil';
   const time=(i:number,j:0|1,v:string)=>html`<input type="time" aria-label=${j?'Fin':'Début'} .value=${v} @change=${(e:Event)=>{const l=(hc??[['','']]).map(r=>[...r] as [string,string]);l[i][j]=(e.target as HTMLInputElement).value;setHc(l);}}>`;
   const priceIn=(k:string,ph:number|null|undefined,label:string)=>listRow({label,control:true,value:html`<input type="number" step="0.0001" min="0" aria-label=${label} placeholder=${ph!=null?num(ph,4):''}
    .value=${this.val(k)!=null?String(this.val(k)):''} @change=${(e:Event)=>{const v=(e.target as HTMLInputElement).value;this.set(k,v===''?null:Number(v));}}><span class="nk-unit">€ le kWh</span>`});
@@ -341,7 +342,9 @@ export class HestiaEnergySetup extends LitElement {
     ...(opt!=='hphc'?[]:[
      listRow({label:'Heures creuses',control:true,sub:!hc?html`<b style="color:var(--nk-todo)">Un seul compteur : indiquez-les, elles sont sur votre facture.</b>`:this.val('offpeak')==null&&f.offpeak.valeur?'Votre facture dit quelques minutes de plus ou de moins ? Corrigez ici.':undefined,
       value:html`<span class="hc">${(hc??[['','']]).map(([x,y],i)=>html`<span>${time(i,0,x)}<span class="nk-unit">à</span>${time(i,1,y)}${(hc??[]).length>1?html`<button type="button" class="nk-reset-s" @click=${()=>{const l=[...hc!];l.splice(i,1);setHc(l);}}>Retirer</button>`:nothing}</span>`)}</span>${hc?this.tag('offpeak',f.offpeak.source):nothing}`}),
-     listRow({label:'Ajouter une plage',go:()=>setHc([...(hc??[]),['12:00','14:00']])})]),
+     listRow({label:'Ajouter une plage',go:()=>setHc([...(hc??[]),['12:00','14:00']])}),
+     listRow({label:'Le week-end et les jours fériés',control:true,sub:wk==='tout'?'Heures creuses toute la journée, les samedis, dimanches et jours fériés.':'Les mêmes heures qu’en semaine.',
+      value:html`${segmented('Le week-end et les jours fériés',[['pareil','Comme en semaine'],['tout','Toute la journée']],wk as 'pareil'|'tout',v=>this.set('offpeak_weekend',v===f.offpeak_weekend?.valeur?null:v))}${this.tag('offpeak_weekend',f.offpeak_weekend?.source)}`})]),
     listRow({label:'Puissance souscrite',control:true,sub:'Sur votre facture : « puissance souscrite ».',value:html`<select aria-label="Puissance souscrite" @change=${(e:Event)=>{const v=Number((e.target as HTMLSelectElement).value);this.set('kva',v===f.kva.valeur?null:v);}}>
       ${[3,6,9,12,15,18,24,30,36].map(v=>html`<option value=${v} ?selected=${kva===v}>${v} kVA</option>`)}</select>${this.tag('kva',f.kva.source)}`}),
     listRow({label:'Prix du kWh',control:true,sub:offer==='autre'?'Les prix de votre facture.':bleuText,

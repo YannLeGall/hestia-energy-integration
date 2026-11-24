@@ -7,6 +7,7 @@ from datetime import date
 import voluptuous as vol
 from homeassistant.components import websocket_api
 from homeassistant.core import callback
+from homeassistant.exceptions import HomeAssistantError
 
 from . import hub_view
 from .const import DOMAIN
@@ -177,6 +178,8 @@ SETTINGS = vol.Schema({
     vol.Optional("notify_hour"): vol.All(vol.Coerce(int), vol.Range(min=0, max=23)),
     # one or more ranges « 00:14-08:19, 12:00-14:00 »; None: those read on the meters
     vol.Optional("offpeak"): vol.Any(None, vol.All(str, vol.Length(max=120), vol.Match(r"^\s*\d{1,2}[:h]\d{2}\s*-\s*\d{1,2}[:h]\d{2}(\s*,\s*\d{1,2}[:h]\d{2}\s*-\s*\d{1,2}[:h]\d{2})*\s*$"))),
+    # weekends and public holidays: « tout » off-peak all day, « pareil » the same hours; None: what the meters show
+    vol.Optional("offpeak_weekend"): vol.Any(None, vol.In(("tout", "pareil"))),
     vol.Optional("bag_price"): vol.Any(None, vol.All(vol.Coerce(float), vol.Range(min=0, max=100))),
     vol.Optional("offer"): vol.Any(None, vol.In(("bleu", "autre"))),
     vol.Optional("price_hp"): _PRICE, vol.Optional("price_hc"): _PRICE, vol.Optional("price_base"): _PRICE,
@@ -189,9 +192,30 @@ SETTINGS = vol.Schema({
     vol.Optional("groups"): {str: vol.In(hub.GROUPS)},
     vol.Optional("extensions"): {vol.In(_EXTENSIONS): bool},
 })
-KEYS = ("kva", "margin", "export_price", "option", "bag_price", "notify_service", "notify_hour", "offpeak", "offer", "price_hp",
+KEYS = ("kva", "margin", "export_price", "option", "bag_price", "notify_service", "notify_hour", "offpeak", "offpeak_weekend", "offer", "price_hp",
         "price_hc", "price_base", "subscription", "water_price", "stove_fuel", "notify_day", "notify_week", "notify_month",
         "notify_leak", "notify_forgot", "groups", "extensions", "weather_place")
+
+
+# The contract's settings an automation may change (issue 18: an offer Hestia does not know, its hours and prices
+# set by the household's own automation). The same checks as the hub's.
+SERVICE_KEYS = ("option", "offer", "offpeak", "offpeak_weekend", "price_hp", "price_hc", "price_base", "subscription",
+                "kva", "export_price")
+SERVICE_SCHEMA = vol.Schema({
+    **{vol.Optional(k): SETTINGS.schema[vol.Optional(k)] for k in SERVICE_KEYS},
+    # an automation's number may come as « 9 » or 9.0
+    vol.Optional("kva"): vol.Any(None, vol.All(vol.Coerce(int), vol.In((3, 6, 9, 12, 15, 18, 24, 30, 36)))),
+})
+
+
+def async_setup_services(hass) -> None:
+    async def set_settings(call) -> None:
+        c = _coordinator(hass)
+        if c is None:
+            raise HomeAssistantError("Hestia Énergie n'est pas activée.")
+        await c.async_save_settings(dict(call.data), wait=False)
+
+    hass.services.async_register(DOMAIN, "set_settings", set_settings, schema=SERVICE_SCHEMA)
 
 
 @websocket_api.websocket_command({vol.Required("type"): "hestia_energy/settings"})

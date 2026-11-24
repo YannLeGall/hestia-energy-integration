@@ -97,5 +97,53 @@
         "name": "Donnée douteuse"
       }
     }
+  },
+  "services": {
+    "set_settings": {
+      "name": "Régler le contrat",
+      "description": "Change les heures creuses, les prix ou l’option du contrat, comme dans Réglages. Pour une offre que Hestia ne connaît pas, une automatisation peut ainsi suivre ses saisons.",
+      "fields": {
+        "option": {
+          "name": "Option",
+          "description": "base, hphc (heures creuses) ou tempo."
+        },
+        "offer": {
+          "name": "Prix du kWh",
+          "description": "bleu : le Tarif Bleu d’EDF ; autre : les prix donnés ici."
+        },
+        "offpeak": {
+          "name": "Heures creuses",
+          "description": "Une ou plusieurs plages, par exemple « 00:00-07:00, 13:00-16:00 »."
+        },
+        "offpeak_weekend": {
+          "name": "Le week-end et les jours fériés",
+          "description": "tout : heures creuses toute la journée ; pareil : les mêmes heures qu’en semaine."
+        },
+        "price_hp": {
+          "name": "Prix des heures pleines",
+          "description": "En euros le kWh, avec l’offre « autre »."
+        },
+        "price_hc": {
+          "name": "Prix des heures creuses",
+          "description": "En euros le kWh, avec l’offre « autre »."
+        },
+        "price_base": {
+          "name": "Prix du kWh en Base",
+          "description": "En euros le kWh, avec l’offre « autre »."
+        },
+        "subscription": {
+          "name": "Abonnement",
+          "description": "En euros par an, avec l’offre « autre »."
+        },
+        "kva": {
+          "name": "Puissance souscrite",
+          "description": "En kVA."
+        },
+        "export_price": {
+          "name": "Prix de revente",
+          "description": "En euros le kWh."
+        }
+      }
+    }
   }
 }
