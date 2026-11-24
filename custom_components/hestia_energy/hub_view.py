@@ -639,6 +639,8 @@ def found_settings(hass, c) -> dict:
         "option": {"valeur": option, "source": option_from},
         "offpeak": {"valeur": None if learned is None else [[_hhmm(r.start), _hhmm(r.end)] for r in learned.ranges],
                     "source": None if learned is None else "lues sur le compteur"},
+        "offpeak_weekend": {"valeur": None if learned is None else tariff.WEEKEND_ALL if learned.weekend_all else tariff.WEEKEND_SAME,
+                            "source": None if learned is None else "lu sur le compteur"},
         "kva": {"valeur": kva, "source": "trouvée sur le compteur" if kva else None},
         "offer": {"valeur": "autre" if page_prices and not on_page else "bleu",
                   "source": "lu dans la page Énergie" if page_prices else None},

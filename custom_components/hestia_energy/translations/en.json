@@ -97,5 +97,53 @@
         "name": "Doubtful data"
       }
     }
+  },
+  "services": {
+    "set_settings": {
+      "name": "Set the contract",
+      "description": "Changes the off-peak hours, the prices or the contract option, as in Settings. For an offer Hestia does not know, an automation can follow its seasons.",
+      "fields": {
+        "option": {
+          "name": "Option",
+          "description": "base, hphc (off-peak hours) or tempo."
+        },
+        "offer": {
+          "name": "Price of a kWh",
+          "description": "bleu: EDF's regulated tariff; autre: the prices given here."
+        },
+        "offpeak": {
+          "name": "Off-peak hours",
+          "description": "One or more ranges, for example \"00:00-07:00, 13:00-16:00\"."
+        },
+        "offpeak_weekend": {
+          "name": "Weekends and public holidays",
+          "description": "tout: off-peak all day; pareil: the same hours as on weekdays."
+        },
+        "price_hp": {
+          "name": "Peak price",
+          "description": "In euros per kWh, with the « autre » offer."
+        },
+        "price_hc": {
+          "name": "Off-peak price",
+          "description": "In euros per kWh, with the « autre » offer."
+        },
+        "price_base": {
+          "name": "Base price",
+          "description": "In euros per kWh, with the « autre » offer."
+        },
+        "subscription": {
+          "name": "Subscription",
+          "description": "In euros a year, with the « autre » offer."
+        },
+        "kva": {
+          "name": "Subscribed power",
+          "description": "In kVA."
+        },
+        "export_price": {
+          "name": "Resale price",
+          "description": "In euros per kWh."
+        }
+      }
+    }
   }
 }

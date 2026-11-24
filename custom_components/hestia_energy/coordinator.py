@@ -37,7 +37,7 @@ DEFAULTS = {"kva": None, "option": None, "margin": 0.1, "watched": {"seche_servi
             # the pellet bag (€), when Suivi Stock Pellet has no purchase to price the kilo from
             "bag_price": None,
             # the off-peak hours as typed (« 22:00-06:00 »), used when no meter shows them
-            "offpeak": None,
+            "offpeak": None, "offpeak_weekend": None,
             # 2.9: the reviews sent by a notify service of Home Assistant, at this hour; None: no notification (default)
             "notify_service": None, "notify_hour": 8,
             # The hub (INTERFACE.md § 5, H7): which reviews are sent, and the alerts sent at once.
@@ -369,7 +369,9 @@ class EnergyCoordinator:
         self.offpeak_found = tariff.learn_offpeak(peak, offpeak, self.tz) if peak and offpeak else None
         # The off-peak hours the household typed come first (the bill may say a few minutes more or less, H7);
         # else those learned on the two meters.
-        self.offpeak = tariff.parse_offpeak(self.settings.get("offpeak")) or self.offpeak_found
+        # Weekends and holidays: the household's choice, else what the meters showed (issue 18).
+        self.offpeak = tariff.with_weekend(tariff.parse_offpeak(self.settings.get("offpeak")) or self.offpeak_found,
+                                           self.settings.get("offpeak_weekend"), self.offpeak_found)
         # Hour by hour is proven by the statistics: HA Linky gives its older days in one step each (F1.2).
         if self.level and not self.level.hourly:
             self.level = dataclasses.replace(self.level, hourly=_hourly(imports, now))
@@ -633,6 +635,7 @@ class EnergyCoordinator:
                                                   "evolution": cards.night_drift(nights, price)},
             "veille_hausse": None if rise is None else {"w": rise.watts, "reference": rise.reference, "depuis": rise.since.isoformat()},
             "heures_creuses": None if self.offpeak is None else [r.label() for r in self.offpeak.ranges],
+            "heures_creuses_week_end": bool(self.offpeak and self.offpeak.weekend_all),
             "contrat": {"option": self.contract.option, "kva": self.contract.kva, "prix": self.contract.prices,
                         "revente": self.contract.export_price,
                         # what is only supposed, not read (one Linky meter): the cards ask to confirm it in Réglages
@@ -730,6 +733,8 @@ class EnergyCoordinator:
         if self.offpeak and self.offpeak.ranges:
             labels = [x for r in self.offpeak.ranges[:2] for x in r.label()]
             values = dict(zip(("h1", "h2", "h3", "h4"), labels))
+            if self.offpeak.weekend_all:
+                values["avec"] = (" en semaine, toute la journée le week-end et les jours fériés",)
             lines.append({"rubrique": "geste", "id": "hc_plages", "texte": phrases.know("hc_plages", values)})
         behind = (panels or {}).get("en_retrait") or []
         if panels and panels.get("onduleur_muet_min"):

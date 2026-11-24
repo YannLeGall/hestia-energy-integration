@@ -93,7 +93,7 @@ def banner(id: str, values: dict | None = None) -> dict:
 
 # « À savoir » (PHRASES.md § 3): three rubrics, one line each at most.
 KNOW = {
-    "hc_plages": "Heures creuses de {h1} à {h2}[ et de {h3} à {h4}].",
+    "hc_plages": "Heures creuses de {h1} à {h2}[ et de {h3} à {h4}][ en semaine, toute la journée le week-end et les jours fériés].",
     "hc_dans": "Heures creuses dans {minutes} min.",
     "revente_vaut_peu": "Un kWh gardé vaut {facteur} fois un kWh revendu.",
     "veille_hausse": "La nuit, {logement} consomme plus qu'en {mois} : environ {euros} € de plus par an.",

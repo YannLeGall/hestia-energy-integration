@@ -1,0 +1,62 @@
+set_settings:
+  fields:
+    option:
+      selector:
+        select:
+          options: ["base", "hphc", "tempo"]
+    offer:
+      selector:
+        select:
+          options: ["bleu", "autre"]
+    offpeak:
+      example: "00:00-07:00, 13:00-16:00"
+      selector:
+        text:
+    offpeak_weekend:
+      selector:
+        select:
+          options: ["tout", "pareil"]
+    price_hp:
+      example: 0.21114
+      selector:
+        number:
+          min: 0
+          max: 5
+          step: 0.00001
+          mode: box
+    price_hc:
+      example: 0.14949
+      selector:
+        number:
+          min: 0
+          max: 5
+          step: 0.00001
+          mode: box
+    price_base:
+      selector:
+        number:
+          min: 0
+          max: 5
+          step: 0.00001
+          mode: box
+    subscription:
+      selector:
+        number:
+          min: 0
+          max: 5000
+          step: 0.01
+          mode: box
+    kva:
+      example: 9
+      selector:
+        number:
+          min: 3
+          max: 36
+          mode: box
+    export_price:
+      selector:
+        number:
+          min: 0
+          max: 1
+          step: 0.00001
+          mode: box
