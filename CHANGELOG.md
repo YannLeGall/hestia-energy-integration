@@ -1,3 +1,15 @@
+## À venir
+
+### Corrections
+
+- Les offres avec un registre du Linky par saison et par période (comme Enercoop « 2 saisons » avec ses jours de pointe) : chaque registre garde son prix. Avant, Énergie ne gardait qu’un prix d’heures pleines et un d’heures creuses, ceux du dernier registre lu : en hiver, le prix d’été en heures creuses et le prix de pointe en heures pleines. Les euros des jours passés et le prix du moment sont maintenant justes.
+- Le prix du moment et la période en cours suivent le registre qui compte en ce moment, et le libellé du Linky « H CREUSE HIVER », « H POINTE »… est maintenant reconnu.
+- Les heures creuses apprises lisent tous les registres d’une période, pas seulement le premier.
+
+### Documentation
+
+- La page du contrat explique comment sont comptés les jours passés quand la page Énergie a un compteur par période.
+
 ## 1.0.0b7 — Une nouvelle page d’accueil Hestia-FB
 
 ### Améliorations

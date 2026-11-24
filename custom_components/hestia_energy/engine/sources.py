@@ -18,7 +18,8 @@ FORMAT_OLD = "ancien"
 
 # Words that make a meter an off-peak or a peak one (French and English names, entity ids, price entities).
 _HC = re.compile(r"(?<![a-z])(hc|heures? creuses?|creuses?|off ?peak|low ?tariff)(?![a-z])")
-_HP = re.compile(r"(?<![a-z])(hp|heures? pleines?|pleines?|peak|high ?tariff)(?![a-z])")
+# « Pointe » (Enercoop, EJP): peak hours at a dearer price, counted on a register of their own.
+_HP = re.compile(r"(?<![a-z])(hp|heures? pleines?|pleines?|pointes?|peak|high ?tariff)(?![a-z])")
 # A « gas » source that is really a stove: Home Assistant's page has no pellets or wood (D6, F1.6).
 _STOVE = re.compile(r"(poele|pellet|granule|bois|wood|stove|insert)")
 

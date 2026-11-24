@@ -97,6 +97,7 @@ class EnergyCoordinator:
         self.offpeak_found: tariff.OffPeak | None = None   # learned from the meters, before the household's own hours
         self.found_extras: dict = {}                       # the extensions found, before those switched off (H8)
         self.page_prices: dict = {}                        # the prices the Energy page gives now
+        self.meter_prices: dict = {}                       # each meter's own price, when one period has several meters
         self._alerted: set[str] = set()                    # the alerts already sent (leak, forgotten device)
         self.contract: tariff.Contract | None = None
         self.locality: dict[str, bool | None] = {}
@@ -362,8 +363,9 @@ class EnergyCoordinator:
             self.home_raw, self.home = raw, followed
             self._built_with = built_with
         imports = self.home.of("import")
-        peak = next((r.series for r in imports if r.meter.period == "hp"), None)
-        offpeak = next((r.series for r in imports if r.meter.period == "hc"), None)
+        # Every register of a period, as one (issue 18: winter and summer registers, a peak-day one).
+        peak = _together([r.series for r in imports if r.meter.period == "hp"])
+        offpeak = _together([r.series for r in imports if r.meter.period == "hc"])
         self.offpeak_found = tariff.learn_offpeak(peak, offpeak, self.tz) if peak and offpeak else None
         # The off-peak hours the household typed come first (the bill may say a few minutes more or less, H7);
         # else those learned on the two meters.
@@ -380,7 +382,7 @@ class EnergyCoordinator:
         self._follow_weather()
         await self._fetch_cold(now)
         await self._fetch_colours(now)
-        prices, export_price = self._prices(), self._export_price()
+        prices, export_price = self._prices(now), self._export_price()
         self.page_prices = dict(prices)
         self.panel_names = {c: solar.panel_name(_friendly(self.hass, c)) for c in self.extras["channels"]}
         self.device_names = {m.stat: _device_name(_friendly(self.hass, m.stat)) for m in self.page.devices if not m.name}
@@ -521,13 +523,31 @@ class EnergyCoordinator:
                 "sac_kg": found.get("bag_kg"), "du": first.isoformat(),
                 **(cards.stove_stock(found.get("stock_kg"), season.kg, found.get("days_used"), first, now.date()) or {})}
 
-    def _prices(self) -> dict:
-        """The prices the Energy page gives now (an entity or a number), per period."""
-        prices = {}
-        for meter in self.page.imports if self.page else []:
+    def _prices(self, now: datetime) -> dict:
+        """The prices the Energy page gives now (an entity or a number), per period.
+
+        Several meters for one period (issue 18: a Linky with winter and summer registers and a peak-day one): the
+        period's price is that of the meter that counted the most over the last 14 days (this season's, not the rare
+        peak days'), and each meter keeps its own price for its own energy (`meter_prices`). Before, the last meter
+        read won: the summer off-peak price and the peak-day price, in winter.
+        """
+        prices: dict[str, float] = {}
+        counted: dict[str, float] = {}
+        own: dict[str, float] = {}
+        meters: dict[str, int] = {}
+        series = {r.meter.stat: r.series for r in self.home.of("import")} if self.home else {}
+        imports = self.page.imports if self.page else []
+        for meter in imports:
             value = _number(self.hass.states.get(meter.price.entity)) if meter.price.entity else meter.price.number
-            if value is not None:
-                prices[meter.period or ("base" if len(self.page.imports) == 1 else "hp")] = value
+            if value is None:
+                continue
+            key = meter.period or ("base" if len(imports) == 1 else "hp")
+            own[meter.stat] = value
+            meters[key] = meters.get(key, 0) + 1
+            kwh = _recent_kwh(series.get(meter.stat), now - timedelta(days=14), now)
+            if key not in prices or kwh > counted[key]:
+                prices[key], counted[key] = value, kwh
+        self.meter_prices = own if any(n > 1 for n in meters.values()) else {}
         return prices
 
     def _export_price(self) -> float | None:
@@ -557,6 +577,8 @@ class EnergyCoordinator:
         # The page's prices are today's (Tarif EDF): on the regulated tariff, every past day keeps its own price.
         elif offer == "bleu" or tariff.regulated_today(contract, self.table, local.date()):
             contract.prices = {}
+        # Each register at its own price (issue 18), unless the household says it is on the regulated tariff.
+        contract.meter_prices = {} if offer == "bleu" or (offer != "autre" and not contract.prices) else dict(self.meter_prices)
         # Set whole, never changed afterwards: the live part and Hestia Comfort read it meanwhile (audit, 9 Nov. 2026).
         self.contract = contract
         today = report.day(home, self.contract, self.table, local.date())
@@ -740,6 +762,22 @@ class EnergyCoordinator:
             line["titre"] = phrases.KNOW_TITLES[line["rubrique"]]
         return lines
 
+    def _active_register(self, now: datetime) -> sources.Meter | None:
+        """The import meter counting now, when the page has a register per period with its own price (issue 18).
+
+        A Linky moves one register at a time: the one whose state changed last, within the hour, is the one counting.
+        """
+        if not self.page or not self.contract or not self.contract.meter_prices:
+            return None
+        best, best_at = None, now - timedelta(hours=1)
+        for meter in self.page.imports:
+            if meter.stat not in self.contract.meter_prices:
+                continue
+            state = self.hass.states.get(meter.stat)
+            if state is not None and state.last_changed > best_at:
+                best, best_at = meter, state.last_changed
+        return best
+
     def _price_of(self, period: str, at: datetime) -> float | None:
         return tariff.price_at(self.contract, self.table, at, self.tz, None if period == "base" else period)
 
@@ -858,6 +896,10 @@ class EnergyCoordinator:
         self._alert(banner)
         price = None
         if self.contract:
+            # The register counting now says the price of the moment: its season, a peak day (issue 18).
+            active = self._active_register(now)
+            price = self.contract.meter_prices.get(active.stat) if active is not None else None
+        if self.contract and price is None:
             price = tariff.price_at(self.contract, self.table, now, self.tz, None if period in (None, "base") else period, colour_now)
         heat_now = heating.now(reader.thermostats(self.hass) if self.used("vt") else [])
         self.data["direct"] = {
@@ -873,10 +915,13 @@ class EnergyCoordinator:
         self._notify()
 
     def _period(self, now: datetime) -> str | None:
-        """The period from the meter (TIC) first, then the learned hours (3.1 arbiter)."""
+        """The period from the meter (TIC) first, then the register counting now, then the learned hours (3.1 arbiter)."""
         state = self.hass.states.get(self.extras["period"]) if self.extras.get("period") else None
         if state is not None and (period := reader.period_of(state.state)):
             return period
+        active = self._active_register(now)
+        if active is not None and active.period:
+            return active.period
         if self.contract and self.contract.option == tariff.BASE:
             return "base"
         if self.offpeak is not None:
@@ -886,6 +931,20 @@ class EnergyCoordinator:
 
 def _merge(old: dict, fresh: dict, start: datetime) -> dict:
     return {sid: merge_rows(old.get(sid), fresh.get(sid), start) for sid in set(old) | set(fresh)}
+
+
+def _together(series: list[stats.Series]) -> stats.Series | None:
+    """Several registers of one period as one meter (one register stays itself)."""
+    if not series:
+        return None
+    return series[0] if len(series) == 1 else stats.merge(*series)
+
+
+def _recent_kwh(series: stats.Series | None, start: datetime, end: datetime) -> float:
+    """The energy a meter counted between two instants (0 when not known)."""
+    if series is None:
+        return 0.0
+    return sum(h.kwh for h in series.between(start, end) if h.kwh is not None)
 
 
 def _number(state) -> float | None:

@@ -196,6 +196,10 @@ class Contract:
     colors: dict = field(default_factory=dict)
     # A home that sends its surplus to the grid pays the « majoration auto-producteur » (CRE, 9,60 € HT a year).
     self_producer: bool = False
+    # The price of each meter, by its statistic, when the page has several meters for one period (issue 18: a Linky
+    # with a register per season and one for the peak days, each with its own price on the Energy page). A meter only
+    # counts its own period, so its energy takes its own price, never the one of another register of that period.
+    meter_prices: dict = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -233,6 +237,7 @@ def cost(contract: Contract, table: dict, tz: tzinfo, metered: list[tuple[Series
 
     `metered`: each import meter and the period it counts (« hp », « hc »), or None when it counts everything.
     `colors`: the Tempo colour of each Tempo day ({date: « bleu »…}); a Tempo day runs from 6 h to 6 h.
+    A meter with its own price (`Contract.meter_prices`) is counted at that price.
     """
     eur, unknown_kwh, unknown_hours = 0.0, 0.0, 0
     for series, period in metered:
@@ -247,7 +252,9 @@ def cost(contract: Contract, table: dict, tz: tzinfo, metered: list[tuple[Series
             color = None
             if colors is not None:
                 color = colors.get((hour.start.astimezone(tz) - timedelta(hours=6)).date())
-            price = price_at(contract, table, hour.start, tz, period, color)
+            price = contract.meter_prices.get(series.stat)
+            if price is None:
+                price = price_at(contract, table, hour.start, tz, period, color)
             if price is None:
                 unknown_kwh += hour.kwh
             else:
