@@ -1,4 +1,4 @@
-## À venir
+## 1.0.0b8 — Les offres à plusieurs registres, le week-end en heures creuses
 
 ### Nouveautés
 
