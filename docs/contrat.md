@@ -26,7 +26,7 @@ Les heures apprises suivent les quatre dernières semaines. Juste après le chan
 
 ## Régler le contrat par une automatisation
 
-L’action **`hestia_energy.set_settings`** change les mêmes réglages que la page Réglages : `option`, `offer`, `offpeak`, `offpeak_weekend`, `price_hp`, `price_hc`, `price_base`, `subscription`, `kva`, `export_price`. Une valeur vide (`null`) rend à Hestia ce qu’elle a trouvé.
+L’action **`hestia_energy.set_settings`** change les mêmes réglages que la page Réglages : `option`, `offer`, `offpeak`, `offpeak_weekend`, `price_hp`, `price_hc`, `price_base`, `subscription`, `kva`, `export_price`, et pour le gaz `gas_price`, `gas_subscription`, `gas_cta`, `gas_ticgn`, `gas_ht`, `gas_kwh_m3` (voir [la facture de gaz](cartes.md#la-facture-de-gaz)). Une valeur vide (`null`) rend à Hestia ce qu’elle a trouvé.
 
 Par exemple, pour passer à l’hiver le 1er novembre :
 

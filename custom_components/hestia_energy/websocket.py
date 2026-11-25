@@ -11,7 +11,7 @@ from homeassistant.exceptions import HomeAssistantError
 
 from . import hub_view
 from .const import DOMAIN
-from .engine import hub, report
+from .engine import heating, hub, report
 
 RUBRIQUES = ("soleil", "chauffage", "eau", "contrat", "appareils", "veille", "pointe")
 VIEW_VERSION = 1
@@ -186,6 +186,16 @@ SETTINGS = vol.Schema({
     vol.Optional("subscription"): vol.Any(None, vol.All(vol.Coerce(float), vol.Range(min=0, max=5000))),
     vol.Optional("water_price"): vol.Any(None, vol.All(vol.Coerce(float), vol.Range(min=0, max=50))),
     vol.Optional("stove_fuel"): vol.Any(None, vol.In(("pellets", "gas"))),
+    # what heats the home, when the household says it; None: as found (engine/heating.py)
+    vol.Optional("heating"): vol.Any(None, vol.In(heating.SOURCES)),
+    # the gas bill's lines (engine/gas.py): the price of a kWh, the subscription and the CTA a month, the TICGN a MWh,
+    # typed before VAT or not, and the kWh in a cubic metre
+    vol.Optional("gas_price"): _PRICE,
+    vol.Optional("gas_subscription"): vol.Any(None, vol.All(vol.Coerce(float), vol.Range(min=0, max=500))),
+    vol.Optional("gas_cta"): vol.Any(None, vol.All(vol.Coerce(float), vol.Range(min=0, max=100))),
+    vol.Optional("gas_ticgn"): vol.Any(None, vol.All(vol.Coerce(float), vol.Range(min=0, max=200))),
+    vol.Optional("gas_ht"): bool,
+    vol.Optional("gas_kwh_m3"): vol.Any(None, vol.All(vol.Coerce(float), vol.Range(min=5, max=20))),
     # the Hestia Weather place (its entry id) that gives the cold; None: the only one, or the first
     vol.Optional("weather_place"): vol.Any(None, vol.All(str, vol.Length(min=1, max=64))),
     **{vol.Optional(k): bool for k in ("notify_day", "notify_week", "notify_month", "notify_leak", "notify_forgot")},
@@ -194,13 +204,16 @@ SETTINGS = vol.Schema({
 })
 KEYS = ("kva", "margin", "export_price", "option", "bag_price", "notify_service", "notify_hour", "offpeak", "offpeak_weekend", "offer", "price_hp",
         "price_hc", "price_base", "subscription", "water_price", "stove_fuel", "notify_day", "notify_week", "notify_month",
-        "notify_leak", "notify_forgot", "groups", "extensions", "weather_place")
+        "notify_leak", "notify_forgot", "groups", "extensions", "weather_place", "heating", "gas_price", "gas_subscription",
+        "gas_cta", "gas_ticgn", "gas_ht", "gas_kwh_m3")
 
 
 # The contract's settings an automation may change (issue 18: an offer Hestia does not know, its hours and prices
 # set by the household's own automation). The same checks as the hub's.
 SERVICE_KEYS = ("option", "offer", "offpeak", "offpeak_weekend", "price_hp", "price_hc", "price_base", "subscription",
-                "kva", "export_price")
+                "kva", "export_price",
+                # the gas bill's lines too: its price and its taxes change every few months
+                "gas_price", "gas_subscription", "gas_cta", "gas_ticgn", "gas_ht", "gas_kwh_m3")
 SERVICE_SCHEMA = vol.Schema({
     **{vol.Optional(k): SETTINGS.schema[vol.Optional(k)] for k in SERVICE_KEYS},
     # an automation's number may come as « 9 » or 9.0

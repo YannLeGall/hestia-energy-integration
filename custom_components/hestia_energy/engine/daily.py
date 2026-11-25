@@ -143,11 +143,15 @@ def month_budget(last_year, projection: float | None, now: datetime) -> dict | N
 
 
 def advices(home, contract, table, now: datetime, cold: dict, weather: bool, price: float | None, last_year,
-            projection: float | None) -> list[dict]:
-    """Every advice that holds today: the unusual day first (it is news), then the most euros a year."""
+            projection: float | None, radiators: bool = True) -> list[dict]:
+    """Every advice that holds today: the unusual day first (it is news), then the most euros a year.
+
+    `radiators`: False when the household said another energy heats the home (Réglages): its electricity still
+    explains a day by the cold, but no degree less is advised on radiators it does not have."""
     learned = heating.learn(home.used_days(), cold) if weather else None
     found = [unusual_day(home, contract, table, now, cold, learned), contract_option(home, contract, table, now),
-             baseload(home, price), heating_degree(home, now, cold, learned, price), month_budget(last_year, projection, now)]
+             baseload(home, price), heating_degree(home, now, cold, learned, price) if radiators else None,
+             month_budget(last_year, projection, now)]
     news = [a for a in found[:1] if a]
     rest = sorted((a for a in found[1:] if a), key=lambda a: -(a["euros_an"] or 0))
     return news + rest

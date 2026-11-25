@@ -10,7 +10,7 @@ from calendar import monthrange
 import dataclasses
 from datetime import date, datetime, timedelta, tzinfo
 
-from . import baseline, heating, report, solar, sources, stats, tariff
+from . import baseline, gas, heating, report, solar, sources, stats, tariff
 from .home import Home
 from .rows import when
 from .tariff import Contract
@@ -67,14 +67,16 @@ def stove_stock(stock_kg: float | None, season_kg: float | None, days_used: floa
 
 
 def gas_season(readings: list, units: dict[str, str | None], prices: dict[str, float], cold: dict[date, float],
-               no_cold: str | None, now: datetime) -> dict | None:
+               no_cold: str | None, now: datetime, fixed: float | None = None, declared: str | None = None) -> dict | None:
     """The gas meters of the page, this month and this season: all that was burnt and, when the cold of each day is
     known, the heating in it — the radiators' line (engine/heating.py), drawn through the gas of each day, says what
     the home burns without heating; the rest of the gas is the heating.
 
-    `units`: each meter's unit (« kWh » or « m³ »); `prices`: its price now, per unit; `no_cold`: why the cold is not
-    known (the state then shown), or None; `now`: local. None without a meter whose unit is known, when the meters
-    do not count in the same unit (kWh and m³ are never added up), or when nothing was counted this season."""
+    `units`: each meter's unit (« kWh » or « m³ »); `prices`: its price now, per unit, taxes included; `no_cold`: why
+    the cold is not known (the state then shown), or None; `now`: local; `fixed`: the subscription and the CTA of one
+    month (engine/gas.py), or None; `declared`: what the household says heats the home, or None. None without a meter
+    whose unit is known, when the meters do not count in the same unit (kWh and m³ are never added up), or when
+    nothing was counted this season."""
     readings = [r for r in readings if units.get(r.meter.stat)]
     if len({units[r.meter.stat] for r in readings}) != 1:
         return None
@@ -111,7 +113,12 @@ def gas_season(readings: list, units: dict[str, str | None], prices: dict[str, f
     month = heating.gas_over(burnt, rest, today.replace(day=1), today, price)
     state = no_cold or ("apprend" if learned is None else "pret" if learned.reliable else "peu_lie")
     out = {"etat": state, "unite": unit, "prix": _r(price, 4), "mois": None if month is None else month.as_dict(),
-           "saison": {**season.as_dict(), "du": first.isoformat()}}
+           "saison": {**season.as_dict(), "du": first.isoformat(),
+                      # what was paid whatever was burnt, since the season's first day
+                      "abonnement": None if fixed is None else _r(fixed * gas.months(first, now))},
+           # shown as heating or not (the household's word first), and this month's bill once the subscription is known
+           "chauffe": heating.gas_heats(state, declared),
+           "facture": gas.month_bill(None if month is None else month.eur, fixed, now)}
     if state == "apprend":
         out["jours"] = sum(1 for d in known if d in cold)
     elif state == "pret":

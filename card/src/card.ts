@@ -26,7 +26,8 @@ type Direct={achat_w:number|null;revente_w:number|null;soleil_w:number|null;mais
 type Heat={kwh:number;eur:number|null;jours:number};
 /** The gas of a period (engine/heating.py): all of it, and the heating in it once the cold explains it. */
 type GasPart={total:number;eur:number|null;chauffage:number|null;chauffage_eur:number|null;jours:number};
-type Gas={etat:string;unite:string;prix:number|null;mois:GasPart|null;saison:GasPart&{du:string};euros_par_degre?:number|null};
+type Gas={etat:string;unite:string;prix:number|null;mois:GasPart|null;saison:GasPart&{du:string;abonnement?:number|null};euros_par_degre?:number|null;
+ chauffe?:boolean;facture?:{gaz:number;fixe:number;fin_de_mois:number|null}|null};
 type Stove={mois:{kg:number;eur:number|null}|null;saison:{kg:number;eur:number|null};prix_kg:number|null;sac_kg:number|null;stock_kg?:number|null;jours_restants?:number|null};
 type View={pret:boolean;palier:number;equipement:{direct?:boolean;soleil?:boolean;appareils?:boolean};direct?:Direct;
  jour?:Period;hier?:Period;mois?:Period;mois_an_dernier?:Period;projection:number|null;
@@ -47,7 +48,7 @@ type View={pret:boolean;palier:number;equipement:{direct?:boolean;soleil?:boolea
  soleil_jour?:{plus_fort:{h:number;kwh:number}|null;prix_evite:number|null;groupes:{nom:string;kwh:number}[]};
  appareils_jour?:{appareils:{nom:string;kwh:number;euros:number|null}[];mesure_kwh:number;maison_kwh:number;sans_prise_kwh:number|null;prix_moyen:number|null}|null;
  pointe?:{h:number;kw:number;part:number|null}|null;
- chauffage?:{etat:string;mois?:Heat|null;saison?:(Heat&{du:string})|null;euros_par_degre?:number|null;poele?:Stove|null;gaz?:Gas|null};
+ chauffage?:{etat:string;source?:string|null;mois?:Heat|null;saison?:(Heat&{du:string})|null;euros_par_degre?:number|null;poele?:Stove|null;gaz?:Gas|null};
  usage?:Usage|null};
 /** « Votre contrat, bien utilisé » (engine/habits.py): the last 12 months. */
 type Device={nom:string;type:string;kwh:number;soleil:number;nuit:number;pleines:number;pleines_kwh:number;euros_an:number};
@@ -469,8 +470,9 @@ class HestiaEnergyCard extends LitElement {
    c.option==='base'&&c.prix_base!=null?`${price(c.prix_base)} € le kWh à toute heure.`:'Vos prix et vos heures.'));
   return out;
  }
- /** The gas that heats, or may: not the gas a home burns for its hot water only (« peu lié » to the cold). */
- private _gas(v:View){const g=v.chauffage?.gaz;return g&&g.etat!=='peu_lie'?g:null;}
+ /** The gas that heats, or may: as the household said in Réglages; not said, not the gas a home burns for its hot
+     water only (« peu lié » to the cold). */
+ private _gas(v:View){const g=v.chauffage?.gaz;return g&&(g.chauffe??g.etat!=='peu_lie')?g:null;}
  /** The heating season in one figure: stove, gas and radiators together, or the one known. */
  private _heatSum(v:View):{val:string;unit:string;say:string;both:boolean}|null{
   const h=v.chauffage,el=h?.etat==='pret'?h.saison:null,st=h?.poele?.saison,gas=this._gas(v),gh=gas?.etat==='pret'?gas.saison:null;
@@ -481,6 +483,7 @@ class HestiaEnergyCard extends LitElement {
   if(el)return {val:el.eur!=null?eur(el.eur):kwh(el.kwh),unit:el.eur!=null?'€':'kWh',say:'Radiateurs, estimés d\'après le froid.',both:false};
   if(gas)return {val:gas.saison.eur!=null?eur(gas.saison.eur):num(gas.saison.total,0),unit:gas.saison.eur!=null?'€':gas.unite,say:'Gaz : chauffage et eau chaude ensemble.',both:false};
   if(h?.etat==='peu_lie')return {val:'—',unit:'',say:'Vous chauffez sans doute avec une autre énergie.',both:false};
+  if(h?.etat==='autre_energie')return {val:'—',unit:'',say:h.source==='gas'?'Chauffage au gaz : son compteur n\'est pas encore suivi.':'Vous chauffez avec une autre énergie.',both:false};
   return null;
  }
 
@@ -656,7 +659,10 @@ class HestiaEnergyCard extends LitElement {
    meteo_sans_lieu:'Pour estimer les radiateurs, ajoutez votre maison dans Hestia Météo.',
    meteo_sans_donnees:'Hestia Météo ne donne pas le froid des jours passés : choisissez un capteur de température dans ses réglages.',
    apprend:'Il faut quelques semaines de froid pour estimer les radiateurs. Revenez cet hiver.',
-   peu_lie:'Votre électricité varie peu avec le froid : vous chauffez sans doute surtout avec une autre énergie.'};
+   peu_lie:'Votre électricité varie peu avec le froid : vous chauffez sans doute surtout avec une autre énergie.',
+   // said in Réglages: the home is not heated with electricity
+   autre_energie:h?.source==='gas'?'Vous chauffez au gaz : ajoutez son compteur à la page Énergie de Home Assistant, Hestia comptera le chauffage.'
+    :'D\'après vos réglages, vous chauffez avec une énergie qu\'Hestia ne mesure pas.'};
   const how='Radiateurs : estimés en comparant chaque jour votre électricité au froid qu\'il a fait.';
   const howGas='Chauffage au gaz : le gaz brûlé, moins ce que la maison brûle sans chauffage (l\'eau chaude, la cuisson), appris en comparant le gaz au froid.';
   let val='',unit='',cap='',answer:unknown;
@@ -668,8 +674,10 @@ class HestiaEnergyCard extends LitElement {
    answer=html`${stove.eur!=null?html`<b>${num(stove.kg,0)} kg</b> de granulés. `:''}${el?html`Les radiateurs, <b>environ ${el.eur!=null?`${eur(el.eur)} €`:`${kwh(el.kwh)} kWh`}</b>.`:why[h?.etat??'']??''}`;}
   else if(el){[val,unit,cap]=el.eur!=null?[eur(el.eur),'€','de radiateurs, environ']:[kwh(el.kwh),'kWh','de radiateurs, environ'];answer=how;}
   else if(gas){[val,unit,cap]=gas.saison.eur!=null?[eur(gas.saison.eur),'€','de gaz']:[num(gas.saison.total,0),gas.unite,'de gaz'];
-   answer=`Chauffage et eau chaude ensemble. ${gas.etat==='apprend'?'Il faut quelques semaines de froid pour dire la part du chauffage.':'Pour dire la part du chauffage, Hestia a besoin du froid de chaque jour, que donne Hestia Météo.'}`;}
-  else return this._ans({...head,msg:h?.etat==='peu_lie'?'Une autre énergie chauffe la maison':'Le chauffage n\'est pas encore estimé',why:why[h?.etat??'']??'Ajoutez Hestia Météo, ou le suivi de votre poêle.'});
+   answer=`Chauffage et eau chaude ensemble. ${gas.etat==='apprend'?'Il faut quelques semaines de froid pour dire la part du chauffage.'
+    :gas.etat==='peu_lie'?'Ce gaz suit peu le froid : Hestia ne sait pas dire la part du chauffage.':'Pour dire la part du chauffage, Hestia a besoin du froid de chaque jour, que donne Hestia Météo.'}`;}
+  else return this._ans({...head,msg:h?.etat==='autre_energie'&&h.source==='gas'?'Le chauffage au gaz n\'est pas encore suivi':h?.etat==='peu_lie'||h?.etat==='autre_energie'?'Une autre énergie chauffe la maison':'Le chauffage n\'est pas encore estimé',
+   why:why[h?.etat??'']??'Ajoutez Hestia Météo, ou le suivi de votre poêle.'});
   // Who heats, in euros: each one that has a price, the biggest named.
   const paid:(Bar&{who:[string,string]})[]=[
    ...(stove?.eur!=null?[{n:'Poêle',v:stove.eur,txt:`${eur(stove.eur)} €`,sub:`${num(stove.kg,0)} kg`,who:['Le poêle','fait'] as [string,string]}]:[]),
@@ -690,14 +698,20 @@ class HestiaEnergyCard extends LitElement {
   const where=gh&&rest!=null&&gh.total>0?this._enc('Où part le gaz',html`Le chauffage fait <b>${Math.round((gh.chauffage??0)/gh.total*100)} %</b> du gaz brûlé depuis le 1er octobre.`,
    hb([{n:'Chauffage',v:gh.chauffage??0,txt:gh.chauffage_eur!=null?`${eur(gh.chauffage_eur)} €`:gq(gh.chauffage??0),sub:gh.chauffage_eur!=null?gq(gh.chauffage??0):undefined},
        {n:'Eau chaude, cuisson',v:rest,txt:restEur!=null?`${eur(restEur)} €`:gq(rest),sub:restEur!=null?gq(rest):undefined}],'--nw-heat'),
-   {wide:true,foot:sum?.both?undefined:html`En tout, <b>${gh.eur!=null?`${eur(gh.eur)} €`:gq(gh.total)}</b> de gaz.`}):nothing;
+   {wide:true,foot:sum?.both?undefined:html`En tout, <b>${gh.eur!=null?`${eur(gh.eur)} €`:gq(gh.total)}</b> de gaz${gh.eur!=null&&gh.abonnement!=null?html`, plus <b>${eur(gh.abonnement)} €</b> d'abonnement`:''}.`}):nothing;
+  // The month's gas bill, once the subscription is typed in Réglages: the one figure to set against the supplier's.
+  const b=gas?.facture,cal=MONTHS[new Date().getMonth()];
+  const invoice=b?this._enc('La facture de gaz',b.fin_de_mois!=null?html`En ${cal}, à ce rythme, <b>environ ${eur(b.fin_de_mois)} €</b> à la fin du mois, abonnement compris.`
+    :html`En ${cal}, déjà <b>${bill(b.gaz+b.fixe)} €</b>, l'abonnement du mois compris.`,
+   hb([{n:'Gaz brûlé ce mois-ci',v:b.gaz,txt:`${bill(b.gaz)} €`,sub:gas!.mois?gq(gas!.mois.total):undefined},{n:'Abonnement du mois',v:b.fixe,txt:`${bill(b.fixe)} €`}],'--nw-heat'),
+   {wide:true,foot:gas!.prix!=null?html`Le gaz est compté <b>${num(gas!.prix,4)} € le ${gas!.unite}</b>, taxes comprises.`:undefined}):nothing;
   const stock=st?.stock_kg;
   const bags=stock!=null&&st?.sac_kg?Math.round(stock/st.sac_kg*10)/10:null;
   const pellets=stock!=null&&stove?this._enc('Granulés en stock',stock<=0?html`<b>Plus de granulés</b> en stock.`
     :html`Il reste <b>${bags!=null?`${num(bags,1)} sac${bags>1?'s':''} (${num(stock,0)} kg)`:`${num(stock,0)} kg`}</b>${st?.jours_restants!=null?html` : au rythme de cette saison, <b>environ ${st.jours_restants} jours</b> de poêle`:''}.`,
    html`<div><div class="track" style="--c:var(--nw-heat)"><i style="width:${stove.kg+stock>0?stove.kg/(stove.kg+stock)*100:0}%"></i></div>
     <div class="track-l"><span>brûlés <b>${num(stove.kg,0)} kg</b></span><span>en stock <b>${num(stock,0)} kg</b></span></div></div>`):nothing;
-  return html`${this._ans({...head,val,unit,cap,why:answer})}<div class="encs">${who}${where}${coldGas}${cold}${pellets}</div>`;
+  return html`${this._ans({...head,val,unit,cap,why:answer})}<div class="encs">${who}${where}${invoice}${coldGas}${cold}${pellets}</div>`;
  }
 
  private _night(v:View,over:boolean){

@@ -52,6 +52,27 @@ Avec Hestia Weather, elle dit aussi la part du chauffage dans ce gaz. Elle compa
 
 Le gaz est comparé au froid par groupes de trois jours : une chaudière est souvent comptée avec un jour de décalage. Si le gaz ne suit pas le froid (un chauffe-eau au gaz dans une maison chauffée autrement), la carte n’en fait pas du chauffage.
 
+### La facture de gaz
+
+La page Énergie ne connaît que le prix d’un kWh ou d’un m³ de gaz. Une facture a d’autres lignes : l’abonnement, la CTA (contribution tarifaire d’acheminement), la TICGN (l’accise sur le gaz) et la TVA. Dans **Réglages**, « Le gaz », tapez celles de votre facture. Chacune peut rester vide.
+
+| Réglage | Ce que c’est |
+| --- | --- |
+| **Prix du kWh** | Le prix du kWh de la facture. Vide : le prix de la page Énergie. |
+| **Abonnement** | En euros par mois. |
+| **CTA** | En euros par mois. Vide si elle est déjà dans l’abonnement. |
+| **TICGN** | En euros le MWh. Vide si elle est déjà dans le prix du kWh. |
+| **Montants hors taxes** | Coché : Hestia ajoute la TVA de 20 % à tout, le prix du gaz compris. Tapez tout hors taxes, ou tout TTC. |
+| **Un mètre cube donne** | Le coefficient de conversion de la facture, pour un compteur en m³. Vide : 11,2 kWh, la valeur courante en France. |
+
+Une fois l’abonnement tapé, la carte Chauffage ajoute un encart « La facture de gaz » : le gaz brûlé ce mois-ci, l’abonnement du mois, et où finira le mois à ce rythme (à partir du troisième jour du mois). C’est le chiffre à comparer à la facture du fournisseur. Sans rien taper, rien ne change : le gaz est compté au prix de la page, sans abonnement.
+
+Les euros sont comptés aux prix d’aujourd’hui, pour les mois passés aussi.
+
+### Dire ce qui chauffe la maison
+
+Hestia regarde ce qui suit le froid : l’électricité, ou le gaz. Si elle se trompe, dites-le dans **Réglages**, « Le chauffage » : à l’électricité, au gaz, ou autrement (bois, fioul, réseau de chaleur). L’énergie choisie est alors la seule comptée comme du chauffage : dans une maison chauffée au gaz, l’électricité qui monte en hiver (la lumière, le sèche-linge) n’est plus prise pour des radiateurs. Le poêle à granulés se compte en plus, dans tous les cas.
+
 ## En YAML
 
 Si vous préférez :

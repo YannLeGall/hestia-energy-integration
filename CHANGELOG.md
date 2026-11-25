@@ -6,6 +6,9 @@
 - Avec Hestia Weather, la part du chauffage dans ce gaz. Hestia compare le gaz au froid de chaque jour et apprend ce que la maison brûle sans chauffage (l’eau chaude, la cuisson) ; le reste du gaz est le chauffage. La carte dit aussi ce que coûte un degré de froid en plus, comme pour les radiateurs. Le gaz s’ajoute au poêle et aux radiateurs dans « Qui chauffe ».
 - Le gaz est comparé au froid par groupes de trois jours : une chaudière est souvent comptée avec un jour de décalage, ce qui brouillait la comparaison jour par jour.
 - Dans le panneau, la source « Gaz » montre le gaz de la saison, et « Le chauffage selon le froid » compte aussi une maison chauffée au gaz.
+- La facture de gaz. Le prix de la page Énergie ne compte que le gaz brûlé : il manquait l’abonnement et les taxes, et le chiffre était loin de la facture. Dans Réglages, « Le gaz », on tape maintenant les lignes de sa facture : le prix du kWh, l’abonnement, la CTA, la TICGN, hors taxes ou TTC, et pour un compteur en m³ les kWh d’un mètre cube. La carte Chauffage dit alors où finira la facture du mois, abonnement compris. Laissé vide, rien ne change.
+- Dire ce qui chauffe la maison. Dans Réglages, « Le chauffage » : à l’électricité, au gaz, ou autrement. Hestia continue de le trouver seule d’après le froid ; ce réglage sert quand elle se trompe. L’énergie choisie est la seule comptée comme du chauffage.
+- L’action `hestia_energy.set_settings` règle aussi les lignes de la facture de gaz, pour suivre ses changements de prix par une automatisation.
 
 ## 1.0.0b10 — Les heures creuses tapées s’enregistrent
 

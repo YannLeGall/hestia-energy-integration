@@ -142,6 +142,30 @@
         "export_price": {
           "name": "Prix de revente",
           "description": "En euros le kWh."
+        },
+        "gas_price": {
+          "name": "Prix du kWh de gaz",
+          "description": "En euros le kWh, comme sur la facture de gaz. Vide : le prix de la page Énergie."
+        },
+        "gas_subscription": {
+          "name": "Abonnement du gaz",
+          "description": "En euros par mois."
+        },
+        "gas_cta": {
+          "name": "CTA du gaz",
+          "description": "La contribution tarifaire d’acheminement, en euros par mois."
+        },
+        "gas_ticgn": {
+          "name": "TICGN",
+          "description": "L’accise sur le gaz, en euros le MWh. Vide si le prix du kWh la comprend déjà."
+        },
+        "gas_ht": {
+          "name": "Montants du gaz hors taxes",
+          "description": "Vrai : Hestia ajoute la TVA de 20 % au prix du gaz, à l’abonnement, à la CTA et à la TICGN."
+        },
+        "gas_kwh_m3": {
+          "name": "kWh dans un mètre cube de gaz",
+          "description": "Le coefficient de conversion de la facture, pour un compteur en m³."
         }
       }
     }

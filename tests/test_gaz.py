@@ -9,7 +9,7 @@ import unittest
 from zoneinfo import ZoneInfo
 
 from replay import ROOT  # noqa: F401 - puts the engine on the path
-from engine import cards, heating, stats
+from engine import cards, gas, heating, stats
 from engine.home import Reading
 from engine.sources import GAS_ENERGY, GAS_VOLUME, Meter, Price, gas_unit
 
@@ -47,7 +47,9 @@ def reading(stat: str, name: str, m3_of) -> Reading:
     return Reading(Meter("gas", stat, name, Price(entity="sensor.gaz_prix_m3")), series(stat, m3_of))
 
 
-class GasHome(unittest.TestCase):
+class Invented:
+    """The invented home and its season, for each class of tests."""
+
     @classmethod
     def setUpClass(cls):
         cls.cold = degree_days()
@@ -62,6 +64,8 @@ class GasHome(unittest.TestCase):
                 "now": NOW, **changes}
         return cards.gas_season(**args)
 
+
+class GasHome(Invented, unittest.TestCase):
     def test_the_gas_follows_the_cold(self):
         gas = self.season()
         self.assertEqual(gas["etat"], "pret")
@@ -196,6 +200,113 @@ class GasHome(unittest.TestCase):
         self.assertIsNone(heating.without_heating(winter, self.cold, None))
 
 
+class WhatHeats(Invented, unittest.TestCase):
+    """Said in Réglages, the household's word comes before what the cold shows."""
+
+    def test_not_said_the_gas_that_follows_the_cold_heats(self):
+        self.assertTrue(self.season()["chauffe"])
+        self.assertTrue(self.season(no_cold="sans_meteo")["chauffe"])     # it still may
+        water_only = {"readings": [self.readings[1]], "units": {WATER: GAS_VOLUME}, "prices": {WATER: PRICE}}
+        self.assertFalse(self.season(**water_only)["chauffe"])
+
+    def test_said_it_is_as_the_household_says(self):
+        self.assertFalse(self.season(declared=heating.ELECTRICITY)["chauffe"])
+        self.assertFalse(self.season(declared=heating.OTHER)["chauffe"])
+        water_only = {"readings": [self.readings[1]], "units": {WATER: GAS_VOLUME}, "prices": {WATER: PRICE}}
+        said = self.season(declared=heating.GAS, **water_only)
+        # The gas is the heating, though nothing tells its part: all of it is shown, not split.
+        self.assertEqual((said["chauffe"], said["etat"], said["saison"]["chauffage"]), (True, "peu_lie", None))
+
+    def test_the_electricity_is_read_for_radiators_unless_another_energy_heats(self):
+        self.assertTrue(heating.electricity_heats(None))
+        self.assertTrue(heating.electricity_heats(heating.ELECTRICITY))
+        self.assertFalse(heating.electricity_heats(heating.GAS))
+        self.assertFalse(heating.electricity_heats(heating.OTHER))
+
+    def test_no_degree_less_is_advised_on_radiators_the_home_does_not_have(self):
+        """« Baissez le chauffage d'un degré » is the radiators' advice: not said once another energy heats the home."""
+        from types import SimpleNamespace
+        from unittest.mock import patch
+        from engine import daily
+        said = {"id": "chauffage_degre", "euros_an": 40}
+        nothing = lambda *a: None       # noqa: E731
+        home = SimpleNamespace(used_days=lambda: {})
+        with patch.object(daily, "unusual_day", nothing), patch.object(daily, "contract_option", nothing), \
+                patch.object(daily, "baseload", nothing), patch.object(daily, "month_budget", nothing), \
+                patch.object(daily, "heating_degree", lambda *a: said):
+            self.assertEqual(daily.advices(home, None, {}, NOW, {}, False, None, None, None), [said])
+            self.assertEqual(daily.advices(home, None, {}, NOW, {}, False, None, None, None, radiators=False), [])
+
+
+class GasBill(Invented, unittest.TestCase):
+    """The bill's own lines, typed in Réglages (invented figures): 0.09 € a kWh, a subscription of 20 € a month, a CTA
+    of 3 €, a TICGN of 15 € a MWh, all before VAT; a cubic metre gives 11 kWh."""
+    LINES = gas.Contract(price_kwh=0.09, subscription=20.0, cta=3.0, excise=15.0, before_tax=True, kwh_per_m3=11.0)
+
+    def test_left_empty_the_page_price_is_taken_as_it_is(self):
+        empty = gas.Contract()
+        self.assertEqual(empty.unit_price(GAS_VOLUME, 1.25), 1.25)
+        self.assertEqual(empty.unit_price(GAS_ENERGY, 0.11), 0.11)
+        self.assertIsNone(empty.unit_price(GAS_VOLUME, None))        # no price: no euros, never free
+        self.assertIsNone(empty.fixed_month())
+
+    def test_the_bill_lines_make_the_price_of_one_unit(self):
+        # (0.09 + 0.015) € a kWh, with VAT: 0.126 € ; a cubic metre is 11 of them.
+        self.assertAlmostEqual(self.LINES.unit_price(GAS_ENERGY, 0.5), 0.126, places=6)
+        self.assertAlmostEqual(self.LINES.unit_price(GAS_VOLUME, 0.5), 0.126 * 11, places=6)
+        self.assertAlmostEqual(self.LINES.unit_price(GAS_VOLUME, None), 0.126 * 11, places=6)   # typed: the page's is not needed
+
+    def test_the_excise_alone_is_added_to_the_page_price(self):
+        excise = gas.Contract(excise=15.0)
+        self.assertAlmostEqual(excise.unit_price(GAS_ENERGY, 0.10), 0.115, places=6)
+        # A meter in m³ and no coefficient typed: about 11.2 kWh in a cubic metre.
+        self.assertAlmostEqual(excise.unit_price(GAS_VOLUME, 1.25), 1.25 + 0.015 * gas.KWH_PER_M3, places=6)
+        self.assertIsNone(excise.unit_price(GAS_VOLUME, None))
+
+    def test_typed_with_taxes_nothing_is_added(self):
+        typed = gas.Contract(price_kwh=0.12, subscription=24.0, cta=3.6, kwh_per_m3=11.0)
+        self.assertAlmostEqual(typed.unit_price(GAS_VOLUME, 9.9), 1.32, places=6)
+        self.assertAlmostEqual(typed.fixed_month(), 27.6, places=6)
+
+    def test_what_is_paid_whatever_is_burnt(self):
+        self.assertAlmostEqual(self.LINES.fixed_month(), 23.0 * 1.2, places=6)
+        self.assertAlmostEqual(gas.Contract(subscription=20.0).fixed_month(), 20.0, places=6)
+        self.assertAlmostEqual(gas.Contract(cta=3.0, before_tax=True).fixed_month(), 3.6, places=6)
+
+    def test_the_month_ends_where_its_pace_leads(self):
+        # 25 November, 2 pm: 24 days and 14 hours of a month of 30.
+        bill = gas.month_bill(40.0, 27.6, NOW)
+        self.assertEqual((bill["gaz"], bill["fixe"]), (40.0, 27.6))
+        self.assertAlmostEqual(bill["fin_de_mois"], 40.0 * 30 / (24 + 14 / 24) + 27.6, places=2)
+        # The first days of a month say nothing of its end.
+        self.assertIsNone(gas.month_bill(3.0, 27.6, datetime(2026, 11, 3, 9, tzinfo=PARIS))["fin_de_mois"])
+        # Without a subscription or without a price, no bill: the gas alone is already said.
+        self.assertIsNone(gas.month_bill(40.0, None, NOW))
+        self.assertIsNone(gas.month_bill(None, 27.6, NOW))
+
+    def test_the_months_of_a_season(self):
+        self.assertAlmostEqual(gas.months(date(2026, 10, 1), NOW), 1 + (24 + 14 / 24) / 30, places=6)
+        self.assertAlmostEqual(gas.months(date(2026, 10, 1), datetime(2027, 1, 1, tzinfo=PARIS)), 3.0, places=6)
+
+    def test_the_card_gets_the_bill_of_the_month(self):
+        fixed = self.LINES.fixed_month()
+        price = self.LINES.unit_price(GAS_VOLUME, PRICE)
+        season = self.season(prices={HEATING: price, WATER: price}, fixed=fixed)
+        bill = season["facture"]
+        self.assertAlmostEqual(season["prix"], 0.126 * 11, places=4)
+        self.assertEqual(bill["gaz"], season["mois"]["eur"])
+        self.assertAlmostEqual(bill["fixe"], 27.6, places=2)
+        self.assertAlmostEqual(bill["fin_de_mois"], season["mois"]["eur"] * 30 / (24 + 14 / 24) + 27.6, delta=0.02)
+        # Since 1 October: October whole and November so far.
+        self.assertAlmostEqual(season["saison"]["abonnement"], 27.6 * (1 + (24 + 14 / 24) / 30), delta=0.01)
+
+    def test_without_a_subscription_no_bill_is_said(self):
+        season = self.season()
+        self.assertIsNone(season["facture"])
+        self.assertIsNone(season["saison"]["abonnement"])
+        self.assertIsNone(self.season(prices={HEATING: PRICE}, fixed=27.6)["facture"])     # a meter without a price: no euros
+
+
 class GasUnit(unittest.TestCase):
     def test_the_unit_class_says_it(self):
         self.assertEqual(gas_unit({"unit_class": "energy", "unit_of_measurement": "kWh"}), "kWh")
@@ -222,12 +333,13 @@ try:
     from unittest.mock import patch
 
     sys.path.insert(0, str(ROOT))
-    from custom_components.hestia_energy import coordinator as coordinator_module, hub_view, reader  # noqa: E402
+    from custom_components.hestia_energy import coordinator as coordinator_module, hub_view, reader, websocket  # noqa: E402
     from custom_components.hestia_energy.engine import sources  # noqa: E402
 except ImportError:          # Home Assistant absent: tested on GitHub
     hub_view = None
 
 STOVE = "sensor.poele_granules_energie"
+CUISINE = "sensor.gaz_cuisine"
 
 
 @unittest.skipIf(hub_view is None, "Home Assistant absent")
@@ -244,6 +356,7 @@ class InTheBrick(unittest.TestCase):
         c.tz, c.cold, c.settings = PARIS, self.cold, {**coordinator_module.DEFAULTS, **settings}
         c.gas_units = {HEATING: GAS_VOLUME, WATER: GAS_VOLUME, STOVE: GAS_ENERGY}
         c.gas_prices = {HEATING: PRICE, WATER: PRICE}
+        c.extras = {}
         return c
 
     def home(self, *more):
@@ -267,8 +380,100 @@ class InTheBrick(unittest.TestCase):
         c.page = sources.EnergyPage(sources.FORMAT_2026, gas=[
             Meter("gas", HEATING, "Chauffage", Price(entity="sensor.gaz_prix_m3")), Meter("gas", WATER, "Eau chaude", Price(number=1.3)),
             Meter("gas", "sensor.gaz_cuisine", "Cuisine", Price(entity="sensor.absent"))])
-        c.hass = SimpleNamespace(states=SimpleNamespace(get={"sensor.gaz_prix_m3": SimpleNamespace(state="1.4672")}.get))
-        self.assertEqual(c._gas_prices(), {HEATING: 1.4672, WATER: 1.3})
+        c.hass = SimpleNamespace(states=SimpleNamespace(get={"sensor.gaz_prix_m3": SimpleNamespace(state="1.31")}.get))
+        self.assertEqual(c._gas_prices(), {HEATING: 1.31, WATER: 1.3})
+
+    def test_the_bill_lines_typed_in_settings_make_each_meters_price(self):
+        """The price typed replaces the page's (a meter without one gets it too), the TICGN and VAT are added; a meter
+        whose unit is not known keeps the page's price, and is not counted anyway."""
+        c = self.coordinator(gas_price=0.09, gas_ticgn=15.0, gas_ht=True, gas_kwh_m3=11.0)
+        c.gas_units[CUISINE] = GAS_ENERGY
+        c.page = sources.EnergyPage(sources.FORMAT_2026, gas=[
+            Meter("gas", HEATING, "Chauffage", Price(entity="sensor.gaz_prix_m3")), Meter("gas", WATER, "Eau chaude", Price(number=1.3)),
+            Meter("gas", CUISINE, "Cuisine", Price(entity="sensor.absent")), Meter("gas", "sensor.inconnu", "?", Price(number=2.0))])
+        c.hass = SimpleNamespace(states=SimpleNamespace(get={"sensor.gaz_prix_m3": SimpleNamespace(state="1.31")}.get))
+        prices = c._gas_prices()
+        self.assertAlmostEqual(prices[HEATING], 0.126 * 11, places=6)
+        self.assertAlmostEqual(prices[WATER], 0.126 * 11, places=6)
+        self.assertAlmostEqual(prices[CUISINE], 0.126, places=6)
+        self.assertEqual(prices["sensor.inconnu"], 2.0)
+        # Only the TICGN typed: it is added to the page's price, and a meter without a price stays without.
+        c.settings.update(gas_price=None, gas_ht=False)
+        prices = c._gas_prices()
+        self.assertAlmostEqual(prices[HEATING], 1.31 + 0.015 * 11, places=6)
+        self.assertNotIn(CUISINE, prices)
+
+    def test_the_subscription_typed_gives_the_month_bill(self):
+        gas_ = self.coordinator(gas_subscription=20.0, gas_cta=3.0, gas_ht=True)._gas(self.home(), NOW, "oui")
+        self.assertAlmostEqual(gas_["facture"]["fixe"], 27.6, places=2)
+        self.assertGreater(gas_["facture"]["fin_de_mois"], gas_["mois"]["eur"] + 27.6)
+        self.assertIsNone(self.coordinator()._gas(self.home(), NOW, "oui")["facture"])
+
+    def test_what_heats_the_home_said_in_settings(self):
+        """Gas said: no radiators are read in the electricity, whatever the weather extension's state; electricity
+        said: the gas is counted, not shown as heating."""
+        for said in ("gas", "other"):
+            heat = self.coordinator(heating=said)._heating(self.home(), NOW, None, "non")
+            self.assertEqual(heat, {"etat": "autre_energie", "source": said, "poele": None})
+        self.assertTrue(self.coordinator(heating="gas")._gas(self.home(), NOW, "oui")["chauffe"])
+        self.assertFalse(self.coordinator(heating="electricity")._gas(self.home(), NOW, "oui")["chauffe"])
+        self.assertEqual(self.coordinator(heating="electricity")._heating(self.home(), NOW, None, "non")["etat"], "sans_meteo")
+
+    def test_the_settings_accept_the_bill_lines(self):
+        lines = {"heating": "gas", "gas_price": 0.09, "gas_subscription": 20, "gas_cta": 3, "gas_ticgn": 15, "gas_ht": True,
+                 "gas_kwh_m3": 11}
+        self.assertEqual(websocket.SETTINGS(lines)["gas_subscription"], 20.0)
+        self.assertEqual(websocket.SETTINGS({k: None for k in lines if k != "gas_ht"})["heating"], None)
+        for wrong in ({"heating": "bois"}, {"gas_ticgn": -1}, {"gas_kwh_m3": 110}, {"gas_ht": "oui"}, {"gas_price": 50}):
+            with self.assertRaises(Exception, msg=wrong):
+                websocket.SETTINGS(wrong)
+        self.assertTrue(set(lines) <= set(websocket.KEYS))
+        self.assertTrue(set(lines) <= set(coordinator_module.DEFAULTS))
+        # An automation may follow the gas prices, not say what heats the home.
+        self.assertEqual(websocket.SERVICE_SCHEMA({"gas_price": 0.1, "gas_ticgn": 16})["gas_ticgn"], 16.0)
+        with self.assertRaises(Exception):
+            websocket.SERVICE_SCHEMA({"heating": "gas"})
+
+    def test_the_panel_says_the_bill_and_the_household_s_word(self):
+        gas_ = self.coordinator(gas_subscription=27.6)._gas(self.home(), NOW, "oui")
+        page = sources.EnergyPage(sources.FORMAT_2026, imports=[Meter("import", "sensor.linky")],
+                                  gas=[r.meter for r in self.readings])
+        c = SimpleNamespace(data={"chauffage": {"etat": "autre_energie", "source": "gas", "poele": None, "gaz": gas_}}, page=page, rows={},
+                            reference={}, settings={**coordinator_module.DEFAULTS, "heating": "gas"}, extras={}, contract=None,
+                            level=sources.Level(0, True, False, False, False, True))
+        hass = SimpleNamespace(states=SimpleNamespace(get=lambda entity_id: None))
+        with patch.object(reader, "origins", lambda hass, stats: {}), patch.object(hub_view, "todos", lambda hass, c: []):
+            source = next(s for s in hub_view.build_sources(hass, c) if s["id"] == "gaz")
+        self.assertEqual(len(source["chiffres"]), 3)
+        self.assertRegex(source["chiffres"][2]["texte"], r"^\d+ € ce mois, abonnement compris$")
+        line = next(a for a in hub_view._abilities(hass, c, []) if a["id"] == "chauffage")
+        self.assertEqual((line["etat"], line["avec"]), ("ok", "avec Hestia Weather"))
+        # Another energy said, or the gas said not to heat: the cold's line is not the heating's.
+        c.data["chauffage"] = {"etat": "autre_energie", "source": "other", "poele": None, "gaz": {**gas_, "chauffe": False}}
+        line = next(a for a in hub_view._abilities(hass, c, []) if a["id"] == "chauffage")
+        self.assertEqual((line["etat"], line["avec"]), ("non", "la maison se chauffe autrement, d’après vos réglages"))
+
+    def test_settings_show_what_was_found_and_what_is_counted(self):
+        """Réglages: what the cold shows heats the home, the page's price of a cubic metre, and what Hestia counts once
+        the bill's lines are typed."""
+        c = self.coordinator(gas_subscription=20.0, gas_cta=3.0, gas_ticgn=15.0, gas_ht=True, gas_kwh_m3=11.0)
+        c.page = sources.EnergyPage(sources.FORMAT_2026, imports=[Meter("import", "sensor.linky")], gas=[r.meter for r in self.readings])
+        c.table, c.page_prices, c.found_extras, c.offpeak_found = {}, {}, {}, None
+        c.hass = SimpleNamespace(states=SimpleNamespace(get={"sensor.gaz_prix_m3": SimpleNamespace(state="1.25")}.get),
+                                 services=SimpleNamespace(async_services=lambda: {}), config=SimpleNamespace(components=set()))
+        c.gas_prices = c._gas_prices()
+        c.data = {"chauffage": {"etat": "peu_lie", "poele": None, "gaz": c._gas(self.home(), NOW, "oui")}}
+        found = hub_view.found_settings(c.hass, c)
+        self.assertEqual(found["heating"], {"valeur": "gas", "source": "trouvé d’après le froid"})
+        self.assertTrue(found["a"]["gaz"])
+        self.assertEqual((found["gaz"]["unite"], found["gaz"]["prix_page"], found["gaz"]["kwh_m3"]), ("m³", 1.25, 11.2))
+        self.assertAlmostEqual(found["gaz"]["prix"], (1.25 + 0.015 * 11) * 1.2, places=4)
+        self.assertAlmostEqual(found["gaz"]["fixe"], 27.6, places=6)
+        # A home without gas: nothing found, no gas section.
+        c.page = sources.EnergyPage(sources.FORMAT_2026, imports=[Meter("import", "sensor.linky")])
+        c.data = {"chauffage": {"etat": "pret", "poele": None, "gaz": None}}
+        found = hub_view.found_settings(c.hass, c)
+        self.assertEqual((found["heating"]["valeur"], found["a"]["gaz"], found["gaz"]["unite"]), ("electricity", False, None))
 
     def test_the_panel_says_the_gas_of_the_season_and_the_heating_from_the_cold(self):
         gas = self.coordinator()._gas(self.home(), NOW, "oui")

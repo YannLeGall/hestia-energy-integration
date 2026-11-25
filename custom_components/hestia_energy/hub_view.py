@@ -11,7 +11,7 @@ from homeassistant.const import STATE_UNAVAILABLE
 from homeassistant.util import dt as dt_util
 
 from . import reader
-from .engine import heating, hub, phrases, sources, tariff
+from .engine import gas as gas_engine, heating, hub, phrases, sources, tariff
 
 # The extensions (H8): the other bricks first, then by theme. [key, group, name, what it brings, what happens without it
 # (said without « Sans elle / Sans lui » : the page gives the title, Frank 9 Nov. 2026), link]
@@ -378,9 +378,13 @@ def build_sources(hass, c) -> list[dict]:
     if gas:
         burnt = (d.get("chauffage") or {}).get("gaz") or {}
         total = (burnt.get("saison") or {}).get("total")
+        end = (burnt.get("facture") or {}).get("fin_de_mois")
         add("gaz", "Chaleur", "Gaz", "Le gaz consommé par la maison.", gas, [_origin(m, "Page Énergie", "", hass) for m in gas],
             [{"texte": None if total is None else f"{phrases.number(total, 1 if total < 100 else 0)} {burnt['unite']} cette saison"},
-             {"texte": _eur((burnt.get("saison") or {}).get("eur"))}], gaz_declare=bool(c.settings.get("stove_fuel") == "gas"))
+             {"texte": _eur((burnt.get("saison") or {}).get("eur"))},
+             # the month's bill at this pace, subscription included (Réglages, « Le gaz »)
+             {"texte": None if end is None else f"{_eur(end)} ce mois, abonnement compris"}],
+            gaz_declare=bool(c.settings.get("stove_fuel") == "gas"))
     if page.water:
         water = d.get("eau") or {}
         add("eau", "Eau", "Eau", "Les litres, les euros, et une fuite repérée vite.", page.water,
@@ -528,7 +532,7 @@ def _abilities(hass, c, devices: list[dict]) -> list[dict]:
     state = heat.get("etat")
     # A home heated with gas: its electricity says little, its gas says it (the same line, through the gas of each day).
     gas = heat.get("gaz") or {}
-    if gas.get("etat") in ("pret", "apprend") and state != "pret":
+    if gas.get("chauffe", True) and gas.get("etat") in ("pret", "apprend") and state != "pret":
         heat, state = gas, gas["etat"]
     if state == "pret":
         add("chauffage", "Le chauffage selon le froid", "ok", "avec Hestia Weather")
@@ -537,6 +541,8 @@ def _abilities(hass, c, devices: list[dict]) -> list[dict]:
             f"en apprentissage : {heat.get('jours') or 0} jours sur {heating.MIN_DAYS}")
     elif state == "peu_lie":
         add("chauffage", "Le chauffage selon le froid", "non", "la maison se chauffe surtout autrement")
+    elif state == "autre_energie":
+        add("chauffage", "Le chauffage selon le froid", "non", "la maison se chauffe autrement, d’après vos réglages")
     else:
         add("chauffage", "Le chauffage selon le froid", "non", "il faut Hestia Weather", "extensions/meteo")
     contract = c.contract
@@ -646,6 +652,12 @@ def found_settings(hass, c) -> dict:
     water = next((m.price.number for m in page.water if m.price.number is not None), None) if page else None
     pellets = (c.found_extras or {}).get("pellets")
     learned = c.offpeak_found
+    # What heats the home, as the cold shows it: the gas when it follows the cold, else the electricity when it does.
+    heat = (c.data or {}).get("chauffage") or {}
+    burnt = heat.get("gaz") or {}
+    heats = heating.GAS if burnt.get("etat") == "pret" else heating.ELECTRICITY if heat.get("etat") == "pret" else None
+    gas_meters = [m for m in (page.gas if page else []) if not _stove(m, c)]
+    gas_unit = next((u for u in (c.gas_units.get(m.stat) for m in gas_meters) if u), None)
     services = sorted(n for n in (hass.services.async_services().get("notify") or {}) if n not in ("send_message", "notify"))
     return {
         "option": {"valeur": option, "source": option_from},
@@ -660,11 +672,17 @@ def found_settings(hass, c) -> dict:
         "prix_page": page_prices,
         "export_price": {"valeur": export, "source": "lu dans la page Énergie" if export is not None else None},
         "water_price": {"valeur": water, "source": "lu dans la page Énergie" if water is not None else None},
+        "heating": {"valeur": heats, "source": "trouvé d’après le froid" if heats else None},
+        # The gas: the meters' unit, the Energy page's price of one, what Hestia counts (taxes included) and what
+        # is paid each month whatever is burnt.
+        "gaz": {"unite": gas_unit, "prix_page": next((p for p in (c.gas_page_price(m) for m in gas_meters) if p is not None), None),
+                "prix": burnt.get("prix"), "fixe": c.gas_contract().fixed_month(), "kwh_m3": gas_engine.KWH_PER_M3},
         "margin": {"valeur": 0.1, "source": "par défaut"},
         "sac_kg": (pellets or {}).get("bag_kg"),
         "notify": [{"id": f"notify.{n}", "nom": n.replace("mobile_app_", "").replace("_", " ").capitalize()} for n in services],
         "a": {"revente": bool(page and page.exports), "eau": bool(page and page.water),
               "poele": bool(pellets) or any(_stove(m, c) for m in (page.gas if page else [])),
+              "gaz": bool(gas_meters),
               "delestage": "versatile_thermostat" in hass.config.components and c.used("vt"),
               "un_compteur": bool(page) and not {"hp", "hc"} <= periods},
     }

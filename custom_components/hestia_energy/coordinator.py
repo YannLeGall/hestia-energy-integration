@@ -24,7 +24,7 @@ from homeassistant.util import dt as dt_util
 
 from . import hub_view, reader
 from .const import DOMAIN
-from .engine import advice, anomaly, baseline, cards, daily, habits, health, heating, hub, solar, home as engine_home, live, phrases, report, sources, stats, tariff
+from .engine import advice, anomaly, baseline, cards, daily, gas, habits, health, heating, hub, solar, home as engine_home, live, phrases, report, sources, stats, tariff
 from .engine.rows import Rows, merge as merge_rows
 
 _LOGGER = logging.getLogger(__name__)
@@ -49,6 +49,13 @@ DEFAULTS = {"kva": None, "option": None, "margin": 0.1, "watched": {"seche_servi
             "water_price": None,
             # What a stove declared as gas in the Energy page burns: « pellets », « gas », or None (not said yet).
             "stove_fuel": None,
+            # What heats the home, when the household says it: « electricity », « gas », « other »; None: as found.
+            "heating": None,
+            # The gas bill's own lines (engine/gas.py), each left empty until typed: the price of a kWh (else the
+            # Energy page's), the subscription and the CTA a month, the TICGN a MWh; typed before VAT or not; and
+            # the kWh in a cubic metre, for a meter that counts m³.
+            "gas_price": None, "gas_subscription": None, "gas_cta": None, "gas_ticgn": None, "gas_ht": False,
+            "gas_kwh_m3": None,
             # The Hestia Weather place that gives the cold of each day (its entry id); None: the only one, or the first.
             "weather_place": None,
             # The group of each device ({statistic: « chauffage »…}), when the guess from its name is wrong (H5).
@@ -468,6 +475,10 @@ class EnergyCoordinator:
     def _heating(self, home, local: datetime, month, weather: str) -> dict:
         """The heating estimated from the cold (9.2): one figure for this month and one for last winter, or why not."""
         stove = self._stove(local)
+        declared = self.settings.get("heating")
+        if not heating.electricity_heats(declared):
+            # The household said what heats the home, and it is not the electricity: no radiators are read in it.
+            return {"etat": "autre_energie", "source": declared, "poele": stove}
         missing = self._no_cold(weather, local.date())
         if missing == "meteo_sans_donnees":
             return {"etat": missing, "lieu": self.weather.get("nom"), "poele": stove}
@@ -515,16 +526,31 @@ class EnergyCoordinator:
         """The gas of the Energy page, this month and this season: all that was burnt and, with the cold of each day,
         the heating in it (engine/cards.py). A stove declared as gas is the stove's, not counted here."""
         readings = [r for r in home.of("gas") if not hub_view._stove(r.meter, self)]
-        return cards.gas_season(readings, self.gas_units, self.gas_prices, self.cold, self._no_cold(weather, local.date()), local)
+        return cards.gas_season(readings, self.gas_units, self.gas_prices, self.cold, self._no_cold(weather, local.date()), local,
+                                self.gas_contract().fixed_month(), self.settings.get("heating"))
+
+    def gas_contract(self) -> gas.Contract:
+        """The gas bill's lines as typed in Réglages (each may be empty)."""
+        s = self.settings
+        return gas.Contract(s.get("gas_price"), s.get("gas_subscription"), s.get("gas_cta"), s.get("gas_ticgn"),
+                            bool(s.get("gas_ht")), s.get("gas_kwh_m3"))
 
     def _gas_prices(self) -> dict[str, float]:
-        """Each gas meter's price as the Energy page gives it now (an entity or a number), per unit of the meter."""
+        """Each gas meter's price now, per unit of the meter and taxes included: the price typed in Réglages, else the
+        Energy page's (an entity or a number), with the TICGN and VAT the household asked to add (engine/gas.py)."""
         out: dict[str, float] = {}
+        contract = self.gas_contract()
         for meter in self.page.gas if self.page else []:
-            value = _number(self.hass.states.get(meter.price.entity)) if meter.price.entity else meter.price.number
+            unit = self.gas_units.get(meter.stat)
+            # A meter whose unit is not known is not counted (engine/cards.py): no price is made for it.
+            value = self.gas_page_price(meter) if unit is None else contract.unit_price(unit, self.gas_page_price(meter))
             if value is not None:
                 out[meter.stat] = value
         return out
+
+    def gas_page_price(self, meter) -> float | None:
+        """A gas meter's price as the Energy page gives it now, per unit of the meter."""
+        return _number(self.hass.states.get(meter.price.entity)) if meter.price.entity else meter.price.number
 
     def _stove(self, local: datetime) -> dict | None:
         """The pellet stove this month and this season (from October), in kilos and euros (9.1)."""
@@ -687,7 +713,8 @@ class EnergyCoordinator:
             "pistes": _with_devices(
                 daily.advices(home, self.contract, self.table, now, self.cold, self.weather_cold == "oui", price,
                               report.month(home, self.contract, self.table, local.year - 1, local.month),
-                              report.projection(month, min(now, known) if known else now)),
+                              report.projection(month, min(now, known) if known else now),
+                              heating.electricity_heats(self.settings.get("heating"))),
                 habits.advices(self._usage, self.contract, bool(self.level and self.level.sun))),
             "a_savoir": self._know(today, yesterday, month, rise, price, self._unusual(home, local), panels, bool(to_mend)),
             "mis_a_jour": now.isoformat(),

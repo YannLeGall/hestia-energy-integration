@@ -161,6 +161,27 @@ def gas_over(burnt: dict[date, float], rest: float | None, first: date, last: da
                None if heat is None or price is None else heat * price, len(days))
 
 
+# --- What heats the home, when the household says it (Réglages) ----------------------------------------------------
+#
+# Two lines are drawn against the cold: one through the electricity (the radiators), one through the gas (the boiler).
+# Not said, each is read as found. Said, only the energy named is the heating: the other one's line is not shown as
+# heating (a gas home's electricity also rises in winter: the lights, the dryer). The stove is measured, never guessed:
+# it is counted whatever is said here.
+ELECTRICITY, GAS, OTHER = "electricity", "gas", "other"
+SOURCES = (ELECTRICITY, GAS, OTHER)
+
+
+def electricity_heats(declared: str | None) -> bool:
+    """Whether the electricity is read against the cold to estimate radiators."""
+    return declared in (None, ELECTRICITY)
+
+
+def gas_heats(state: str, declared: str | None) -> bool:
+    """Whether the gas of the Energy page is shown as heating: as the household said; not said, when it follows the
+    cold or still may (« peu lié »: a home that only heats its water with gas)."""
+    return declared == GAS if declared else state != "peu_lie"
+
+
 # --- The pellet stove (9.1), read from Suivi Stock Pellet ---------------------------------------------------------
 
 PELLET_KWH_PER_KG = 4.6   # the usual heat of a kilo of pellets; Suivi Stock Pellet gives its own when set

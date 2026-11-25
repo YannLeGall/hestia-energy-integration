@@ -27,7 +27,8 @@ type Hub={pret:boolean;soleil:boolean;direct:boolean;vide:boolean;a_regler:Todo[
 type Found<V>={valeur:V|null;source:string|null};
 type Settings={reglages:Record<string,unknown>;trouve:{option:Found<string>;offpeak:Found<[string,string][]>;offpeak_weekend?:Found<string>;kva:Found<number>;offer:Found<string>;
  tarif_bleu:{hp?:number|null;hc?:number|null;base?:number|null;abonnement:number|null};prix_page:Record<string,number>;export_price:Found<number>;water_price:Found<number>;
- margin:Found<number>;sac_kg:number|null;notify:{id:string;nom:string}[];a:{revente:boolean;eau:boolean;poele:boolean;delestage:boolean;un_compteur:boolean}}};
+ margin:Found<number>;sac_kg:number|null;notify:{id:string;nom:string}[];a:{revente:boolean;eau:boolean;poele:boolean;gaz:boolean;delestage:boolean;un_compteur:boolean};
+ heating:Found<string>;gaz:{unite:string|null;prix_page:number|null;prix:number|null;fixe:number|null;kwh_m3:number}}};
 
 const REPO='https://github.com/hestiaFB/hestia-energy-integration';
 const VERSION='1.0.0b10';
@@ -335,6 +336,14 @@ export class HestiaEnergySetup extends LitElement {
   const numIn=(k:string,unit:string,step:number,found:number|null|undefined,why:string|null|undefined,label:string)=>html`<input type="number" step=${step} min="0" aria-label=${label}
    .value=${String(this.val<number|null>(k)??found??'')} @change=${(e:Event)=>{const v=(e.target as HTMLInputElement).value;this.set(k,v===''?null:Number(v));}}><span class="nk-unit">${unit}</span>${this.tag(k,why)}`;
   const margin=Math.round((this.val<number>('margin')??0.1)*100);
+  // What heats the home, and the gas bill's own lines (each left empty until typed).
+  const said=this.val<string|null>('heating'),heats=(said??f.heating.valeur??undefined) as 'electricity'|'gas'|'other'|undefined;
+  const heatSub=said==='gas'?'Le gaz de la page Énergie est compté comme le chauffage ; l’électricité, non.'
+   :said==='electricity'?'Radiateurs ou pompe à chaleur, estimés d’après le froid. Le gaz n’est pas compté comme du chauffage.'
+   :said==='other'?'Bois, fioul, réseau de chaleur : Hestia ne le mesure pas.':heats?undefined:'Pas encore trouvé : dites-le, Hestia s’en souviendra.';
+  const g=f.gaz,ht=this.val<boolean>('gas_ht')===true;
+  const gasIn=(k:string,label:string,unit:string,step:number,sub?:string,ph?:string)=>listRow({label,control:true,sub,value:html`<input type="number" step=${step} min="0" aria-label=${label} placeholder=${ph??'—'}
+   .value=${this.val(k)!=null?String(this.val(k)):''} @change=${(e:Event)=>{const v=(e.target as HTMLInputElement).value;this.set(k,v===''?null:Number(v));}}><span class="nk-unit">${unit}</span>`});
   const service=this.val<string|null>('notify_service'),hour=this.val<number>('notify_hour')??8;
   const sw=(k:string,label:string)=>toggle(label,this.val<boolean>(k)!==false,on=>this.set(k,on));
   const bleuText=opt==='hphc'&&bleu.hp!=null?`Heures pleines ${num(bleu.hp,4)} € · heures creuses ${num(bleu.hc??0,4)} €. Hestia suit chaque hausse ou baisse.`
@@ -364,6 +373,20 @@ export class HestiaEnergySetup extends LitElement {
      {help:'Énergie donne à Versatile Thermostat la puissance de la maison et la limite à ne pas dépasser. C’est lui qui coupe et rallume.'}):nothing}
    ${a.poele?listSection('Le poêle',[listRow({label:'Prix du sac de granulés',control:true,sub:'Les achats saisis dans Suivi Stock Pellet passent avant.',
      value:html`<input type="number" step="0.01" min="0" aria-label="Prix du sac" placeholder="—" .value=${this.val('bag_price')!=null?String(this.val('bag_price')):''} @change=${(e:Event)=>{const v=(e.target as HTMLInputElement).value;this.set('bag_price',v===''?null:Number(v));}}><span class="nk-unit">€ le sac${f.sac_kg?` de ${num(f.sac_kg)} kg`:''}</span>`})]):nothing}
+   ${listSection('Le chauffage',[listRow({label:'La maison se chauffe',control:true,sub:heatSub,
+     value:html`${segmented('La maison se chauffe',[['electricity','À l’électricité'],['gas','Au gaz'],['other','Autrement']],heats,v=>this.set('heating',v))}${this.tag('heating',f.heating.source)}`})],
+     {help:'Hestia regarde ce qui suit le froid : l’électricité ou le gaz. Dites-le si elle se trompe. Le poêle à granulés se compte en plus, dans tous les cas.'})}
+   ${a.gaz?listSection('Le gaz',[
+    gasIn('gas_price','Prix du kWh','€ le kWh',0.0001,g.prix_page!=null?`Laissé vide : le prix de la page Énergie, ${num(g.prix_page,4)} € le ${g.unite??'kWh'}.`:'Laissé vide : le prix de la page Énergie.'),
+    gasIn('gas_subscription','Abonnement','€ par mois',0.01),
+    gasIn('gas_cta','CTA','€ par mois',0.01,'La contribution tarifaire d’acheminement. Vide si elle est déjà dans l’abonnement.'),
+    gasIn('gas_ticgn','TICGN','€ le MWh',0.01,'L’accise sur le gaz. Vide si elle est déjà dans le prix du kWh.'),
+    listRow({label:'Montants hors taxes',control:true,sub:ht?'Hestia ajoute la TVA de 20 % à tout : le prix du gaz, l’abonnement, la CTA et la TICGN.':'Tout est compté tel quel : tapez des montants TTC.',
+     value:toggle('Montants hors taxes',ht,on=>this.set('gas_ht',on))}),
+    ...(g.unite==='m³'?[gasIn('gas_kwh_m3','Un mètre cube donne','kWh',0.01,'Le coefficient de conversion, sur votre facture. Il sert au prix du kWh et à la TICGN.',num(g.kwh_m3,1))]:[]),
+    ...(g.prix!=null||g.fixe!=null?[listRow({label:'Ce qu’Hestia compte',sub:'Taxes comprises. Suit vos réglages une fois enregistrés.',
+     value:[g.prix!=null?`${num(g.prix,4)} € le ${g.unite??'kWh'}`:'',g.fixe!=null?`${num(g.fixe,2)} € par mois`:''].filter(x=>x).join(' · ')})]:[]),
+   ],{help:'Les lignes de votre facture de gaz. Laissées vides, Hestia compte le gaz au prix de la page Énergie, sans abonnement ni taxe en plus.'}):nothing}
    ${a.eau?listSection('L’eau',[listRow({label:'Prix du mètre cube',control:true,value:numIn('water_price','€ le m³',0.01,f.water_price.valeur,f.water_price.source,'Prix du mètre cube')})]):nothing}
    ${listSection('Notifications',[
     listRow({label:'Envoyer à',control:true,sub:service?undefined:'Les bilans restent dans les cartes et ici.',value:html`<select aria-label="Envoyer à" @change=${(e:Event)=>{const v=(e.target as HTMLSelectElement).value;this.set('notify_service',v||null);}}>

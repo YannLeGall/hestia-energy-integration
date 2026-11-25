@@ -142,6 +142,30 @@
         "export_price": {
           "name": "Resale price",
           "description": "In euros per kWh."
+        },
+        "gas_price": {
+          "name": "Gas price per kWh",
+          "description": "In euros per kWh, as on the gas bill. Empty: the Energy page's price."
+        },
+        "gas_subscription": {
+          "name": "Gas subscription",
+          "description": "In euros a month."
+        },
+        "gas_cta": {
+          "name": "Gas CTA",
+          "description": "The « contribution tarifaire d’acheminement », in euros a month."
+        },
+        "gas_ticgn": {
+          "name": "TICGN",
+          "description": "The excise on gas, in euros per MWh. Empty when the kWh price already includes it."
+        },
+        "gas_ht": {
+          "name": "Gas amounts before tax",
+          "description": "True: Hestia adds the 20 % VAT to the gas price, the subscription, the CTA and the TICGN."
+        },
+        "gas_kwh_m3": {
+          "name": "kWh in a cubic metre of gas",
+          "description": "The bill's conversion coefficient, for a meter in m³."
         }
       }
     }
