@@ -16,7 +16,7 @@ BANNER = {
                     "{appareils_en_marche} tournent ensemble : attendez avant d'en lancer un autre."),
     "jour_rouge_demain": (GESTE, "Demain jour rouge : préparez ce soir.",
                           "{appareils_decalables} cette nuit, en heures creuses."),
-    "jour_rouge": (GESTE, "Jour rouge jusqu'à 22 h : l'électricité coûte {facteur} fois plus.",
+    "jour_rouge": (GESTE, "Jour rouge jusqu'à 22 h[ : l'électricité coûte {facteur} fois plus].",
                    "Les machines attendront ce soir."),
     "machines_ensemble": (GESTE, "Trop de machines en même temps : le soleil ne suit pas.",
                           "La prochaine fois, lancez-les l'une après l'autre."),
@@ -64,6 +64,7 @@ BETTER = {
 }
 # The tile's chip (PHRASES.md § 4): « Rien à faire », « À revoir », « Bon moment », « Demain rouge », « Urgent ».
 CHIP = {URGENT: "Urgent", GESTE: "À revoir", BENEFICE: "Bon moment", RIEN: "Rien à faire"}
+CHIP_OF = {"jour_rouge_demain": "Demain rouge", "jour_rouge": "Jour rouge"}
 
 _OPTIONAL = re.compile(r"\[([^\]]*)\]")
 _FIELD = re.compile(r"\{(\w+)\}")
@@ -88,7 +89,7 @@ def fill(template: str, values: dict) -> str:
 def banner(id: str, values: dict | None = None) -> dict:
     colour, first, second = BANNER[id]
     values = values or {}
-    return {"id": id, "couleur": colour, "pastille": CHIP[colour], "titre": fill(first, values), "pourquoi": fill(second, values)}
+    return {"id": id, "couleur": colour, "pastille": CHIP_OF.get(id, CHIP[colour]), "titre": fill(first, values), "pourquoi": fill(second, values)}
 
 
 # « À savoir » (PHRASES.md § 3): three rubrics, one line each at most.

@@ -70,6 +70,13 @@ class Situation:
     water_litres_per_day: float | None = None
     watched: dict = field(default_factory=dict)      # device name → its normal duration in hours (« à surveiller »)
     heater_gain: float | None = None   # € a year the water heater's paid peak hours cost more than the night (habits)
+    # Tempo (option Tempo only): the colour of the Tempo day under way and of the next one (« bleu », « blanc »,
+    # « rouge », None when unknown), how many times a red peak hour costs a red off-peak hour, and the devices that
+    # can wait for the night (their names, from the Energy page).
+    colour_now: str | None = None
+    colour_next: str | None = None
+    red_factor: float | None = None
+    shiftable: list[str] = field(default_factory=list)
 
     @property
     def machines(self) -> list[Running]:
@@ -95,6 +102,27 @@ def _minute(at: datetime, tz: tzinfo) -> str:
 def _names(items: list[Running]) -> str:
     names = [r.name if i == 0 else r.name.lower() for i, r in enumerate(items)]
     return names[0] if len(names) == 1 else ", ".join(names[:-1]) + " et " + names[-1]
+
+
+def _list(names: list[str]) -> str:
+    """« Lave-linge, lave-vaisselle et chauffe-eau »: at most three, the first one capitalised by the sentence."""
+    names = [n if i == 0 else n[:1].lower() + n[1:] for i, n in enumerate(names[:3])]
+    return names[0] if len(names) == 1 else ", ".join(names[:-1]) + " et " + names[-1]
+
+
+def _red_peak(s: Situation) -> bool:
+    """A red day's paid hours: 6 h to 22 h (the meter's period first, when it is known)."""
+    if s.period is not None:
+        return s.period == "hp"
+    return 6 <= s.now.astimezone(s.tz).hour < 22
+
+
+def _factor(value: float | None) -> str | None:
+    """« 4,8 », « 12 »: how many times more, said with one decimal under 10."""
+    if value is None or value <= 1:
+        return None
+    text = phrases.number(value, 1 if value < 10 else 0)
+    return text[:-2] if text.endswith(",0") else text
 
 
 def _the(machine: Running) -> str:
@@ -132,7 +160,15 @@ def _pick(s: Situation) -> tuple[str, dict]:
         if big:
             return "disjoncteur", {"appareils_en_marche": _names(big)}
 
-    # 2. A gesture for next time (orange).
+    # 2. Tempo red days (PHRASES.md § 2): the red day's paid hours, then the eve of a red day. A sun in excess keeps its
+    # benefit (a machine on the sun costs nothing, even on a red day).
+    surplus = s.sunny and sent >= SURPLUS_W
+    if s.colour_now == "rouge" and _red_peak(s) and not surplus:
+        return "jour_rouge", {"facteur": _factor(s.red_factor)}
+    if s.colour_next == "rouge" and not surplus:
+        return "jour_rouge_demain", {"appareils_decalables": _list(s.shiftable) if s.shiftable else "Les machines"}
+
+    # 3. A gesture for next time (orange).
     if s.sunny and len(machines) >= 2 and s.sun_w >= 0.6 * machines[0].watts and (bought or 0) >= COVERED_W:
         return "machines_ensemble", {}
     if machines and (bought or 0) >= COVERED_W and s.period != "hc":
@@ -151,7 +187,7 @@ def _pick(s: Situation) -> tuple[str, dict]:
         if normal and r.hours_on is not None and r.hours_on > normal:
             return "oublie", {"appareil": r.name, "duree": f"{int(r.hours_on)} h"}
 
-    # 3. A benefit to take (green), only while the sun kept is worth less than the off-peak hours (guard of card 3).
+    # 4. A benefit to take (green), only while the sun kept is worth less than the off-peak hours (guard of card 3).
     worth = s.export_price is None or s.offpeak_price is None or s.export_price < s.offpeak_price
     if s.sunny and sent >= SURPLUS_W and worth:
         if machines:
@@ -160,7 +196,7 @@ def _pick(s: Situation) -> tuple[str, dict]:
     if s.sunny and machines and bought is not None and bought < 100:
         return "soleil_machine_ok", {"machine": _the(machines[0])}
 
-    # 4. Nothing to do (blue), with the next useful thing.
+    # 5. Nothing to do (blue), with the next useful thing.
     if s.sunny and sent >= SMALL_SURPLUS_W:
         return "rien_soleil_petit", {}
     if s.sunny and bought is not None and bought < COVERED_W:
