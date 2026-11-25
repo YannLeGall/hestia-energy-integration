@@ -1,3 +1,9 @@
+## 1.0.0b10 — Les heures creuses tapées s’enregistrent
+
+### Corrections
+
+- Réglages, heures creuses : sans heures lues sur le compteur (un seul compteur, comme HA Linky), l’heure de début tapée s’effaçait dès qu’on passait à l’heure de fin, et le bouton Enregistrer n’apparaissait jamais. La plage reste maintenant à l’écran pendant qu’on la tape, et Enregistrer apparaît dès qu’elle est complète.
+
 ## 1.0.0b9 — Les jours rouges Tempo
 
 ### Nouveautés
