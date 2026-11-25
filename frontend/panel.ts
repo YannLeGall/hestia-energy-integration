@@ -104,6 +104,8 @@ export class HestiaEnergySetup extends LitElement {
  @state() private saving=false;
  @state() private saved=false;
  @state() private leaving?:string;
+ // The off-peak rows as typed, a half-filled one included: kept here until both its ends are set (issue 21).
+ @state() private hcRows?:[string,string][];
  private loadedFor?:string;
 
  connectedCallback(){super.connectedCallback();window.addEventListener('beforeunload',this.beforeUnload);void this.load();}
@@ -160,7 +162,7 @@ export class HestiaEnergySetup extends LitElement {
   this.saving=true;
   // Kept at once; the figures that follow a setting (prices, off-peak hours) come with the next reports, read again later.
   const before=this.hub?.mis_a_jour;
-  try{await this.hass!.callWS({type:'hestia_energy/set_settings',reglages:this.draft});this.draft={};this.saved=true;this.months=undefined;await this.load();
+  try{await this.hass!.callWS({type:'hestia_energy/set_settings',reglages:this.draft});this.draft={};this.hcRows=undefined;this.saved=true;this.months=undefined;await this.load();
    void this.untilNewReports(before);}
   catch(e){this.error=(e as {message?:string}).message??'Réglages non enregistrés.';}
   finally{this.saving=false;}
@@ -176,7 +178,7 @@ export class HestiaEnergySetup extends LitElement {
   }
  }
  private tag(k:string,why:string|null|undefined){
-  return this.val(k)==null?(why?html`<span class="nk-def">${why}</span>`:nothing):html`<button type="button" class="nk-reset-s" @click=${()=>this.set(k,null)}>Rétablir</button>`;
+  return this.val(k)==null?(why?html`<span class="nk-def">${why}</span>`:nothing):html`<button type="button" class="nk-reset-s" @click=${()=>{if(k==='offpeak')this.hcRows=undefined;this.set(k,null);}}>Rétablir</button>`;
  }
 
  render(){
@@ -188,10 +190,10 @@ export class HestiaEnergySetup extends LitElement {
    appareils:()=>sub?this.devicePage(h,sub):this.devicesPage(h),reglages:()=>this.settingsPage(h),
    extensions:()=>sub?this.extensionPage(h,sub):this.extensionsPage(h),bilan:()=>this.reviewPage(h),'a-propos':()=>this.aboutPage(h)};
   return html`<main>${(pages[p]??pages[''])()}</main>
-   ${saveBar({count:this.count(),busy:this.saving,done:this.saved?'Enregistré':undefined,cancel:()=>{this.draft={};},save:()=>void this.save()})}
+   ${saveBar({count:this.count(),busy:this.saving,done:this.saved?'Enregistré':undefined,cancel:()=>{this.draft={};this.hcRows=undefined;},save:()=>void this.save()})}
    ${this.leaving!==undefined?html`<div class="dlg"><div role="alertdialog" aria-modal="true" aria-label="Quitter sans enregistrer"><h2>Quitter sans enregistrer ?</h2>
     <p>Vos modifications de cette page seront perdues.</p><div class="act"><button @click=${()=>{this.leaving=undefined;}}>Rester</button>
-    <button class="primary" @click=${()=>{const to=this.leaving!;this.leaving=undefined;this.draft={};this.show(to);}}>Quitter sans enregistrer</button></div></div></div>`:nothing}`;
+    <button class="primary" @click=${()=>{const to=this.leaving!;this.leaving=undefined;this.draft={};this.hcRows=undefined;this.show(to);}}>Quitter sans enregistrer</button></div></div></div>`:nothing}`;
  }
 
  /* ── Common pieces ── */
@@ -323,8 +325,9 @@ export class HestiaEnergySetup extends LitElement {
   if(!s)return html`${this.head('Réglages',{lead:'Lecture…'})}`;
   const f=s.trouve,a=f.a,opt=this.val<string|null>('option')??f.option.valeur??'base',kva=this.val<number|null>('kva')??f.kva.valeur??6;
   const offer=this.val<string|null>('offer')??f.offer.valeur??'bleu',bleu=f.tarif_bleu,page=f.prix_page;
-  const hc=parseHc(this.val('offpeak'))??f.offpeak.valeur;
-  const setHc=(l:[string,string][])=>this.set('offpeak',hcText(l));
+  const hc=this.hcRows??parseHc(this.val('offpeak'))??f.offpeak.valeur;
+  // A range typed one end at a time: the first end stays on screen (it was lost before, and with it the save bar).
+  const setHc=(l:[string,string][])=>{this.hcRows=l.length?l:undefined;this.set('offpeak',hcText(l));};
   const wk=this.val<string|null>('offpeak_weekend')??f.offpeak_weekend?.valeur??'pareil';
   const time=(i:number,j:0|1,v:string)=>html`<input type="time" aria-label=${j?'Fin':'Début'} .value=${v} @change=${(e:Event)=>{const l=(hc??[['','']]).map(r=>[...r] as [string,string]);l[i][j]=(e.target as HTMLInputElement).value;setHc(l);}}>`;
   const priceIn=(k:string,ph:number|null|undefined,label:string)=>listRow({label,control:true,value:html`<input type="number" step="0.0001" min="0" aria-label=${label} placeholder=${ph!=null?num(ph,4):''}
