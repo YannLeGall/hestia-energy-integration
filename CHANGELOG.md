@@ -1,4 +1,4 @@
-## À venir — Les jours rouges Tempo
+## 1.0.0b9 — Les jours rouges Tempo
 
 ### Nouveautés
 
