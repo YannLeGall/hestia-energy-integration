@@ -535,7 +535,12 @@ def _abilities(hass, c, devices: list[dict]) -> list[dict]:
     contract = c.contract
     if contract is not None and contract.option == tariff.TEMPO:
         found = bool(c.extras.get("tempo_today"))
-        add("tempo", "La couleur Tempo", "ok" if found else "non", "RTE Tempo" if found else "il faut RTE Tempo",
+        live = d.get("direct") or {}
+        # « Aujourd’hui bleu · demain rouge »: the colours as read now, else only where they come from.
+        said = " · ".join(f"{when} {live[key]}" for when, key in (("aujourd’hui", "couleur"), ("demain", "couleur_demain"))
+                          if live.get(key))
+        add("tempo", "La couleur Tempo", "ok" if found else "non",
+            (said[:1].upper() + said[1:] if said else "RTE Tempo") if found else "il faut RTE Tempo",
             None if found else "extensions/tempo")
     return out
 

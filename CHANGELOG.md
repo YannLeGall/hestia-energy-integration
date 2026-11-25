@@ -1,3 +1,11 @@
+## 1.0.0b9 — Les jours rouges Tempo
+
+### Nouveautés
+
+- Avec l’option Tempo, le conseil du moment parle des jours rouges. La veille d’un jour rouge, dès que RTE a donné la couleur (vers 11 h) : « Demain jour rouge : préparez ce soir », avec les machines et le chauffe-eau à lancer cette nuit, en heures creuses. Le jour rouge, de 6 h à 22 h : « Jour rouge jusqu’à 22 h : l’électricité coûte 4,8 fois plus » (le prix des heures pleines d’un jour rouge, comparé à celui de la nuit). Le soleil en trop garde son conseil : une machine au soleil ne coûte rien, même un jour rouge. Avant, ces deux phrases existaient mais n’étaient jamais dites.
+- La carte montre la couleur Tempo du jour et celle de demain, à côté du prix du kWh. Quand demain est rouge, c’est elle qui vient en premier.
+- Dans l’onglet Énergie du panneau, la ligne « La couleur Tempo » dit les deux couleurs (« Aujourd’hui bleu · demain rouge »).
+
 ## 1.0.0b8 — Les offres à plusieurs registres, le week-end en heures creuses
 
 ### Nouveautés

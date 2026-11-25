@@ -884,11 +884,7 @@ class EnergyCoordinator:
         # The household's own limit for a kind (towel rail: 24 h), else the device's learned one (5.2).
         watched = {r.name: self.settings["watched"].get(r.kind) or self.run_limits.get(r.name) for r in running
                    if self.settings["watched"].get(r.kind) or self.run_limits.get(r.name)}
-        colour_now = colour_next = None
-        if self.extras.get("tempo_today"):
-            colour_now = reader.colour_of(getattr(self.hass.states.get(self.extras["tempo_today"]), "state", None))
-        if self.extras.get("tempo_tomorrow"):
-            colour_next = reader.colour_of(getattr(self.hass.states.get(self.extras["tempo_tomorrow"]), "state", None))
+        tempo = self._tempo(now)
         situation = advice.Situation(
             now=now, tz=self.tz, period=period, next_change=change,
             offpeak_end=change[0] if change and period == "hc" else None,
@@ -896,7 +892,8 @@ class EnergyCoordinator:
             export_price=self.contract.export_price if self.contract else None,
             offpeak_price=self._price_of("hc", now) if self.contract and self.contract.option == tariff.HPHC else None,
             water_leak_min=self.flow.minutes(now), water_litres_per_day=self.flow.litres_per_day if self.flow.since else None,
-            watched=watched, heater_gain=habits.heater_gain(self.data.get("usage")))
+            watched=watched, heater_gain=habits.heater_gain(self.data.get("usage")),
+            **tempo["advice"])
         banner = self.steady.update(advice.choose(situation), now)
         self._alert(banner)
         price = None
@@ -905,19 +902,44 @@ class EnergyCoordinator:
             active = self._active_register(now)
             price = self.contract.meter_prices.get(active.stat) if active is not None else None
         if self.contract and price is None:
-            price = tariff.price_at(self.contract, self.table, now, self.tz, None if period in (None, "base") else period, colour_now)
+            price = tariff.price_at(self.contract, self.table, now, self.tz, None if period in (None, "base") else period,
+                                    tempo["couleur"])
         heat_now = heating.now(reader.thermostats(self.hass) if self.used("vt") else [])
         self.data["direct"] = {
             "achat_w": bought, "revente_w": exported, "soleil_w": produced,
             "maison_w": None if bought is None else bought + (produced or 0.0) - (exported or 0.0),
             "periode": period, "prochain_changement": None if not change else {"a": change[0].isoformat(), "periode": change[1]},
-            "prix": price, "couleur": colour_now, "couleur_demain": colour_next,
+            "prix": price, "couleur": tempo["couleur"], "couleur_demain": tempo["couleur_demain"],
             "en_marche": [{"nom": r.name, "type": r.kind, "w": round(r.watts)} for r in running],
             "fuite": {"minutes": self.flow.minutes(now), "debit": self.flow.rate},
             "chauffage": None if heat_now is None else heat_now.as_dict(price),
             "bandeau": banner, "sources": {k: _verdict(v) for k, v in verdicts.items()}, "a": now.isoformat(),
         }
         self._notify()
+
+    def _tempo(self, now: datetime) -> dict:
+        """The Tempo colours read now, and what the banner needs of them. The red days' advice speaks only to a Tempo
+        contract: a colour read in the home of another contract says nothing."""
+        def colour(key: str) -> str | None:
+            entity = self.extras.get(key)
+            return reader.colour_of(getattr(self.hass.states.get(entity), "state", None)) if entity else None
+
+        today, tomorrow = colour("tempo_today"), colour("tempo_tomorrow")
+        out = {"couleur": today, "couleur_demain": tomorrow, "advice": {}}
+        if self.contract is None or self.contract.option != tariff.TEMPO:
+            return out
+        red_hp = tariff.price_at(self.contract, self.table, now, self.tz, tariff.HP, "rouge")
+        red_hc = tariff.price_at(self.contract, self.table, now, self.tz, tariff.HC, "rouge")
+        # What can wait for the night: the machines and the water heater of the Energy page.
+        names = [(self._name_of(m), m.stat) for m in (self.page.devices if self.page else [])]
+        out["advice"] = {"colour_now": today, "colour_next": tomorrow,
+                         "red_factor": red_hp / red_hc if red_hp and red_hc else None,
+                         "shiftable": [n for n, stat in names if advice.kind_of(n, stat) in ("machine", "chauffe_eau")]}
+        return out
+
+    def _name_of(self, meter) -> str:
+        """A device as the household calls it: its name in the Energy page, else its sensor's."""
+        return meter.name or self.device_names.get(meter.stat) or meter.stat
 
     def _period(self, now: datetime) -> str | None:
         """The period from the meter (TIC) first, then the register counting now, then the learned hours (3.1 arbiter)."""

@@ -20,7 +20,7 @@ type Banner={id:string;couleur:string;pastille:string;titre:string;pourquoi:stri
 type Period={euros:number|null;euros_energie:number|null;kwh_achetes:number;soleil_kwh:number|null;revendu_kwh:number|null;revendu_euros:number|null;soleil_couvre:number|null;soleil_garde:number|null;heures_inconnues:number;debut:string};
 type Hour={h:number;achat:number|null;soleil:number|null;revente:number|null};
 type Running={nom:string;type:string;w:number};
-type Direct={achat_w:number|null;revente_w:number|null;soleil_w:number|null;maison_w:number|null;periode:string|null;prix:number|null;
+type Direct={achat_w:number|null;revente_w:number|null;soleil_w:number|null;maison_w:number|null;periode:string|null;prix:number|null;couleur?:string|null;couleur_demain?:string|null;
  prochain_changement:{a:string;periode:string}|null;en_marche:Running[];bandeau:Banner;fuite:{minutes:number|null;debit:number};
  chauffage?:{pieces:{nom:string;w:number|null}[];w:number|null;euros_de_l_heure:number|null;sans_puissance:string[];poele:boolean}|null};
 type Heat={kwh:number;eur:number|null;jours:number};
@@ -116,7 +116,9 @@ const LEVEL:Record<string,string>={bleu:'ok',vert:'benefit',orange:'action',roug
 const TONE:Record<string,string>={bleu:'--nw-benefit',vert:'--nw-benefit',orange:'--nw-act',rouge:'--nw-alert'};
 const BANNER_ICON:Record<string,string>={fuite_eau:'drop',disjoncteur:'bolt',chauffe_eau_reseau:'drop',soleil_en_trop:'sun',soleil_machine_ok:'sun',
  soleil_chaleur:'sun',machines_ensemble:'plug',machine_sans_soleil:'sun',machine_heures_pleines:'clock',oublie:'plug',rien_hc:'clock',rien_hc_bientot:'clock',
- rien_soleil_juste:'sun',rien_soleil_petit:'sun',rien_soleil_plus_tard:'sun',rien:'home'};
+ rien_soleil_juste:'sun',rien_soleil_petit:'sun',rien_soleil_plus_tard:'sun',rien:'home',jour_rouge:'bolt',jour_rouge_demain:'clock'};
+/** The Tempo colours, as RTE says them, with the colour of the charte that says them. */
+const TEMPO_TONE:Record<string,string>={bleu:'--nw-cold',blanc:'--nw-fg',rouge:'--nw-alert'};
 /** An hour said as a clock: « 11 h », « midi », « minuit ». */
 const hour=(h:number)=>h===12?'midi':h===0||h===24?'minuit':`${h} h`;
 /** An hour of the contract (« 0 h 14 ») kept on one line. */
@@ -310,7 +312,9 @@ class HestiaEnergyCard extends LitElement {
   const sunKwh=known?v.jour?.soleil_kwh:y?.soleil_kwh;
   const priceOk=d?.prix!=null&&!(v.contrat?.a_confirmer??[]).includes('option');
   const next_=d?.prochain_changement?` jusqu'à ${clock(new Date(d.prochain_changement.a))}`:'';
+  const tempo=this._tempo(d);
   const stats=[
+   ...(tempo?[tempo]:[]),
    ...(priceOk?[['Le kWh maintenant',`${price(d!.prix)} €`,`${this._when(d)}${next_}`.trim()||'à toute heure','--nw-home']]:[]),
    ...(known&&v.pointe?[['Heure la plus chargée',`${kw(v.pointe.kw*1000)} kW`,`entre ${hour(v.pointe.h)} et ${hour(v.pointe.h+1)}`,'--nw-grid']]:[]),
    ...(v.equipement.soleil&&sunKwh!=null&&sunKwh>=.05?[['Soleil',`${kwh(sunKwh)} kWh`,known?'produits aujourd\'hui':`produits ${dayName(y?.jour)}`,'--nw-sun']]:[]),
@@ -340,6 +344,13 @@ class HestiaEnergyCard extends LitElement {
      <span class="hint">touchez une heure pour ses chiffres</span></div>
    </div>
   </div>`;
+ }
+ /** Tempo: the colour of the day, and of tomorrow once RTE has said it (about 11 h). A red tomorrow leads: « Tempo demain · Rouge ». */
+ private _tempo(d?:Direct):[string,string,string,string]|null{
+  const now=d?.couleur,next=d?.couleur_demain;
+  if(!now&&!next)return null;
+  if(next==='rouge'&&now!=='rouge')return ['Tempo demain','Rouge',now?`jour ${now} aujourd'hui`:'de 6 h à 6 h',TEMPO_TONE.rouge];
+  return ['Tempo aujourd\'hui',cap(now??'—'),next?`demain ${next}`:'demain pas encore connu',TEMPO_TONE[now??'']??'--nw-fg'];
  }
  /** « Heures pleines jusqu'à 0 h 14, puis heures creuses jusqu'à 8 h 19. »: under a banner that says nothing more. */
  private _periodSay(v:View){
@@ -390,7 +401,7 @@ class HestiaEnergyCard extends LitElement {
    if(d.prix==null||(v.contrat?.a_confirmer??[]).includes('option'))return nothing;
    const next=d.prochain_changement?` jusqu'à ${clock(new Date(d.prochain_changement.a))}`:'';
    return this._section('now','En ce moment',this._when(d),html`<div class="lines"><div class="line"><span class="ico" style="--c:var(--nw-grid)">${icon('clock')}</span>
-    <span>Le kWh coûte <b>${price(d.prix)} €</b>${this._when(d)?` ${this._when(d)}`:''}${next}.</span></div></div>`);
+    <span>Le kWh coûte <b>${price(d.prix)} €</b>${this._when(d)?` ${this._when(d)}`:''}${next}.${d.couleur_demain?` Demain, jour ${d.couleur_demain}.`:''}</span></div></div>`);
   }
   // No « En marche » chips here: the Appareils card says what runs (Frank, 20 Nov. 2026).
   return this._section('now','En ce moment',`${kw(d.maison_w)} kW pour toute la maison`,html`${this._flow(v)}
