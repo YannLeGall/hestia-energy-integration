@@ -10,7 +10,7 @@ from calendar import monthrange
 import dataclasses
 from datetime import date, datetime, timedelta, tzinfo
 
-from . import baseline, report, solar, stats, tariff
+from . import baseline, heating, report, solar, sources, stats, tariff
 from .home import Home
 from .rows import when
 from .tariff import Contract
@@ -64,6 +64,60 @@ def stove_stock(stock_kg: float | None, season_kg: float | None, days_used: floa
     days = days_used if days_used and days_used > 0 else (today - first).days + 1
     per_day = season_kg / days if season_kg and days else None
     return {"stock_kg": _r(stock_kg, 1), "jours_restants": None if not per_day else round(stock_kg / per_day)}
+
+
+def gas_season(readings: list, units: dict[str, str | None], prices: dict[str, float], cold: dict[date, float],
+               no_cold: str | None, now: datetime) -> dict | None:
+    """The gas meters of the page, this month and this season: all that was burnt and, when the cold of each day is
+    known, the heating in it — the radiators' line (engine/heating.py), drawn through the gas of each day, says what
+    the home burns without heating; the rest of the gas is the heating.
+
+    `units`: each meter's unit (« kWh » or « m³ »); `prices`: its price now, per unit; `no_cold`: why the cold is not
+    known (the state then shown), or None; `now`: local. None without a meter whose unit is known, when the meters
+    do not count in the same unit (kWh and m³ are never added up), or when nothing was counted this season."""
+    readings = [r for r in readings if units.get(r.meter.stat)]
+    if len({units[r.meter.stat] for r in readings}) != 1:
+        return None
+    unit = units[readings[0].meter.stat]
+    scale = 0.001 if unit == sources.GAS_VOLUME else 1.0     # volumes are read in litres
+    tz, today = now.tzinfo, now.date()
+    burnt: dict[date, float] = {}
+    counted: dict[date, int] = {}
+    gaps: set[date] = set()
+    since: list[date] = []     # each meter's first day: before it, the meter was not there, and nothing is missing
+    for reading in readings:
+        days = stats.days(reading.series, tz)
+        since.append(min(days, default=today))
+        for day, t in days.items():
+            burnt[day] = burnt.get(day, 0.0) + t.kwh * scale
+            counted[day] = counted.get(day, 0) + 1
+            if not t.complete:
+                gaps.add(day)
+    first = season_start(today)
+    # One price for the euros: the season's own average over the meters, each at its price; none when a meter has none.
+    price = None
+    if all(prices.get(r.meter.stat) is not None for r in readings):
+        start = datetime.combine(first, datetime.min.time(), tz)
+        each = {r.meter.stat: stats.total(r.series, start, now).kwh * scale for r in readings}
+        whole = sum(each.values())
+        price = sum(q * prices[stat] for stat, q in each.items()) / whole if whole > 0 else prices[readings[0].meter.stat]
+    # The line is learned on the whole days every meter there counted: not today, not a day with a gap.
+    known = {d: v for d, v in burnt.items() if d < today and d not in gaps and counted[d] == sum(1 for s in since if s <= d)}
+    learned = None if no_cold else heating.learn(known, cold, heating.GAS_SPAN)
+    rest = heating.without_heating(known, cold, learned)
+    season = heating.gas_over(burnt, rest, first, today, price)
+    if season is None:
+        return None
+    month = heating.gas_over(burnt, rest, today.replace(day=1), today, price)
+    state = no_cold or ("apprend" if learned is None else "pret" if learned.reliable else "peu_lie")
+    out = {"etat": state, "unite": unit, "prix": _r(price, 4), "mois": None if month is None else month.as_dict(),
+           "saison": {**season.as_dict(), "du": first.isoformat()}}
+    if state == "apprend":
+        out["jours"] = sum(1 for d in known if d in cold)
+    elif state == "pret":
+        out.update({"par_degre": _r(learned.per_degree_kwh, 3), "reste_par_jour": _r(rest, 2),
+                    "euros_par_degre": None if price is None else _r(learned.per_degree_kwh * price, 3)})
+    return out
 
 
 # --- Veille · les dernières nuits -------------------------------------------------------------------------------

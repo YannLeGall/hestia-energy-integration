@@ -376,8 +376,11 @@ def build_sources(hass, c) -> list[dict]:
             gaz_declare=bool(stove), sous="Déclaré en gaz dans la page Énergie." if declared else None)
     gas = [m for m in page.gas if m not in stove]
     if gas:
-        add("gaz", "Chaleur", "Gaz", "Le gaz consommé par la maison.", gas,
-            [_origin(m, "Page Énergie", "", hass) for m in gas], [], gaz_declare=bool(c.settings.get("stove_fuel") == "gas"))
+        burnt = (d.get("chauffage") or {}).get("gaz") or {}
+        total = (burnt.get("saison") or {}).get("total")
+        add("gaz", "Chaleur", "Gaz", "Le gaz consommé par la maison.", gas, [_origin(m, "Page Énergie", "", hass) for m in gas],
+            [{"texte": None if total is None else f"{phrases.number(total, 1 if total < 100 else 0)} {burnt['unite']} cette saison"},
+             {"texte": _eur((burnt.get("saison") or {}).get("eur"))}], gaz_declare=bool(c.settings.get("stove_fuel") == "gas"))
     if page.water:
         water = d.get("eau") or {}
         add("eau", "Eau", "Eau", "Les litres, les euros, et une fuite repérée vite.", page.water,
@@ -523,6 +526,10 @@ def _abilities(hass, c, devices: list[dict]) -> list[dict]:
         add("veille", "Ce qui tourne la nuit", "attend", "après 7 nuits")
     heat = d.get("chauffage") or {}
     state = heat.get("etat")
+    # A home heated with gas: its electricity says little, its gas says it (the same line, through the gas of each day).
+    gas = heat.get("gaz") or {}
+    if gas.get("etat") in ("pret", "apprend") and state != "pret":
+        heat, state = gas, gas["etat"]
     if state == "pret":
         add("chauffage", "Le chauffage selon le froid", "ok", "avec Hestia Weather")
     elif state == "apprend":

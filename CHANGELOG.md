@@ -1,3 +1,12 @@
+## À venir
+
+### Nouveautés
+
+- Le chauffage au gaz. Une maison chauffée au gaz voyait seulement « Vous chauffez sans doute avec une autre énergie ». Quand la page Énergie a un compteur de gaz, la carte Chauffage le compte maintenant : le gaz brûlé depuis le 1er octobre, en euros au prix de la page, et en kWh ou en m³ comme le compteur.
+- Avec Hestia Weather, la part du chauffage dans ce gaz. Hestia compare le gaz au froid de chaque jour et apprend ce que la maison brûle sans chauffage (l’eau chaude, la cuisson) ; le reste du gaz est le chauffage. La carte dit aussi ce que coûte un degré de froid en plus, comme pour les radiateurs. Le gaz s’ajoute au poêle et aux radiateurs dans « Qui chauffe ».
+- Le gaz est comparé au froid par groupes de trois jours : une chaudière est souvent comptée avec un jour de décalage, ce qui brouillait la comparaison jour par jour.
+- Dans le panneau, la source « Gaz » montre le gaz de la saison, et « Le chauffage selon le froid » compte aussi une maison chauffée au gaz.
+
 ## 1.0.0b10 — Les heures creuses tapées s’enregistrent
 
 ### Corrections

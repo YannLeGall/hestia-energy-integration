@@ -10,7 +10,7 @@ Une seule carte, **Hestia Énergie**, en plusieurs formats. Chacun répond à un
 | **Tuile** | En ce moment : une phrase, un chiffre. « La maison consomme 1,3 kW. » Quand il n’y a rien à faire, le meilleur conseil. |
 | **Conseils** | Ce qui ferait économiser, en euros par an, du plus rentable au moins rentable. |
 | **Soleil** | Ce que les panneaux ont produit aujourd’hui, groupe par groupe. |
-| **Chauffage** | Ce qu’a coûté la saison, depuis le 1er octobre : radiateurs et poêle. |
+| **Chauffage** | Ce qu’a coûté la saison, depuis le 1er octobre : radiateurs, gaz et poêle. |
 | **Veille** | Ce qui tourne la nuit, sur les 30 dernières nuits, et ce que ça coûte par an. |
 | **Eau** | Les litres et les euros du mois, jour par jour. |
 | **Appareils** | Ce que chaque appareil a consommé aujourd’hui, en kWh et en euros. |
@@ -43,6 +43,14 @@ Les départs habituels sont comptés sur vos derniers mois (la ligne sous la fri
 Une carte de détail répond d’abord en une phrase, avec son chiffre en gras, puis dit pourquoi. Exemple, la carte Veille : « Quand tout dort, la maison consomme 190 W. Cela fait environ 330 € par an. »
 
 Un format que votre maison ne peut pas remplir le dit simplement : sans panneaux, la carte Soleil n’a rien à montrer.
+
+### Le chauffage au gaz
+
+Si la page Énergie de Home Assistant a un ou plusieurs compteurs de gaz, la carte Chauffage les compte, sans réglage : en kWh ou en m³, comme le compteur, et en euros au prix que donne la page.
+
+Avec Hestia Weather, elle dit aussi la part du chauffage dans ce gaz. Elle compare le gaz brûlé au froid qu’il a fait, et apprend ainsi ce que la maison brûle sans chauffage : l’eau chaude et la cuisson, lues sur les jours sans froid dès qu’un été est passé. Le reste du gaz est le chauffage. Il faut environ deux mois de mesures, dont trois semaines de froid. En attendant, la carte montre tout le gaz de la saison, chauffage et eau chaude ensemble.
+
+Le gaz est comparé au froid par groupes de trois jours : une chaudière est souvent comptée avec un jour de décalage. Si le gaz ne suit pas le froid (un chauffe-eau au gaz dans une maison chauffée autrement), la carte n’en fait pas du chauffage.
 
 ## En YAML
 

@@ -98,6 +98,8 @@ class EnergyCoordinator:
         self.found_extras: dict = {}                       # the extensions found, before those switched off (H8)
         self.page_prices: dict = {}                        # the prices the Energy page gives now
         self.meter_prices: dict = {}                       # each meter's own price, when one period has several meters
+        self.gas_units: dict[str, str | None] = {}         # each gas meter's unit (« kWh » or « m³ »), from its statistics
+        self.gas_prices: dict[str, float] = {}             # each gas meter's price now, per unit of the meter
         self._alerted: set[str] = set()                    # the alerts already sent (leak, forgotten device)
         self.contract: tariff.Contract | None = None
         self.locality: dict[str, bool | None] = {}
@@ -341,6 +343,7 @@ class EnergyCoordinator:
         now = dt_util.utcnow()
         meta = await reader.metadata(self.hass, ids)
         self.level = sources.equipment(self.page, meta)
+        self.gas_units = {m.stat: sources.gas_unit(meta.get(m.stat)) for m in self.page.gas}
         start = now - timedelta(days=YEAR_DAYS if full or not self.rows else RECENT_DAYS)
         fresh = {sid: Rows.of(values) for sid, values in (await reader.hourly(self.hass, ids, start)).items()}
         self.rows = fresh if full or not self.rows else _merge(self.rows, fresh, start)
@@ -386,6 +389,7 @@ class EnergyCoordinator:
         await self._fetch_colours(now)
         prices, export_price = self._prices(now), self._export_price()
         self.page_prices = dict(prices)
+        self.gas_prices = self._gas_prices()
         self.panel_names = {c: solar.panel_name(_friendly(self.hass, c)) for c in self.extras["channels"]}
         self.device_names = {m.stat: _device_name(_friendly(self.hass, m.stat)) for m in self.page.devices if not m.name}
         self.inverter_silent = self._inverter_silent()
@@ -464,14 +468,11 @@ class EnergyCoordinator:
     def _heating(self, home, local: datetime, month, weather: str) -> dict:
         """The heating estimated from the cold (9.2): one figure for this month and one for last winter, or why not."""
         stove = self._stove(local)
-        if weather != "oui":
-            state = {"non": "sans_meteo", "ancienne": "meteo_ancienne", "incompatible": "meteo_incompatible",
-                     "sans_lieu": "meteo_sans_lieu"}.get(weather, "sans_meteo")
-            return {"etat": state, "poele": stove}
-        if not any(d < local.date() for d in self.cold):
-            # Weather is there but gives no past day: its place has no temperature sensor, or none old enough. Said,
-            # never left « learning » for ever.
-            return {"etat": "meteo_sans_donnees", "lieu": self.weather.get("nom"), "poele": stove}
+        missing = self._no_cold(weather, local.date())
+        if missing == "meteo_sans_donnees":
+            return {"etat": missing, "lieu": self.weather.get("nom"), "poele": stove}
+        if missing:
+            return {"etat": missing, "poele": stove}
         used = home.used_days()
         learned = heating.learn(used, self.cold)
         if learned is None:
@@ -498,6 +499,32 @@ class EnergyCoordinator:
                 "hiver_dernier": None if winter is None or winter.days < 0.9 * ((end - start).days + 1) else {**winter.as_dict(), "du": start.isoformat(),
                                                                                     "au": end.isoformat()},
                 "par_degre_kwh": round(learned.per_degree_kwh, 2), "poele": stove}
+
+    def _no_cold(self, weather: str, today: date) -> str | None:
+        """Why the cold of each day is not known (the state the heating then shows), or None when it is."""
+        if weather != "oui":
+            return {"non": "sans_meteo", "ancienne": "meteo_ancienne", "incompatible": "meteo_incompatible",
+                    "sans_lieu": "meteo_sans_lieu"}.get(weather, "sans_meteo")
+        if not any(d < today for d in self.cold):
+            # Weather is there but gives no past day: its place has no temperature sensor, or none old enough. Said,
+            # never left « learning » for ever.
+            return "meteo_sans_donnees"
+        return None
+
+    def _gas(self, home, local: datetime, weather: str) -> dict | None:
+        """The gas of the Energy page, this month and this season: all that was burnt and, with the cold of each day,
+        the heating in it (engine/cards.py). A stove declared as gas is the stove's, not counted here."""
+        readings = [r for r in home.of("gas") if not hub_view._stove(r.meter, self)]
+        return cards.gas_season(readings, self.gas_units, self.gas_prices, self.cold, self._no_cold(weather, local.date()), local)
+
+    def _gas_prices(self) -> dict[str, float]:
+        """Each gas meter's price as the Energy page gives it now (an entity or a number), per unit of the meter."""
+        out: dict[str, float] = {}
+        for meter in self.page.gas if self.page else []:
+            value = _number(self.hass.states.get(meter.price.entity)) if meter.price.entity else meter.price.number
+            if value is not None:
+                out[meter.stat] = value
+        return out
 
     def _stove(self, local: datetime) -> dict | None:
         """The pellet stove this month and this season (from October), in kilos and euros (9.1)."""
@@ -593,7 +620,7 @@ class EnergyCoordinator:
         base = baseline.baseload(home.bought, self.tz, min_nights=daily.MIN_NIGHTS) if home.bought else None
         rise = baseline.rise(home.bought, self.tz, local.date()) if home.bought and base else None
         self._learn_runs()
-        heat = self._heating(home, local, month, self.weather_cold)
+        heat = {**self._heating(home, local, month, self.weather_cold), "gaz": self._gas(home, local, self.weather_cold)}
         panels = self._panels(local)
         if self.contract.option == tariff.HPHC:
             price = baseline.average_price(self._price_of("hp", now), self._price_of("hc", now))

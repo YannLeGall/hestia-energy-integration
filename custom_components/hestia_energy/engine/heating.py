@@ -36,10 +36,15 @@ class Learned:
         return self.per_degree_kwh * max(0.0, degree_days)
 
 
-def learn(used: dict[date, float], degree_days: dict[date, float]) -> Learned | None:
-    """The line through each day's (cold, consumption). None with too few days to say anything."""
-    points = [(degree_days[d], kwh) for d, kwh in used.items() if degree_days.get(d) is not None]
-    if len(points) < MIN_DAYS or sum(1 for x, _ in points if x > 2) < MIN_COLD_DAYS:
+def learn(used: dict[date, float], degree_days: dict[date, float], span: int = 1) -> Learned | None:
+    """The line through each day's (cold, consumption). None with too few days to say anything.
+
+    `span`: days in a row read together, as their mean (see GAS_SPAN). The line is the same, its points are steadier."""
+    if span > 1:
+        points = _together(used, degree_days, span)
+    else:
+        points = [(degree_days[d], kwh) for d, kwh in used.items() if degree_days.get(d) is not None]
+    if len(points) * span < MIN_DAYS or sum(1 for x, _ in points if x > 2) * span < MIN_COLD_DAYS:
         return None
     n = len(points)
     mx = sum(x for x, _ in points) / n
@@ -50,7 +55,21 @@ def learn(used: dict[date, float], degree_days: dict[date, float]) -> Learned | 
         return None
     sxy = sum((x - mx) * (y - my) for x, y in points)
     slope = sxy / sxx
-    return Learned(rest_kwh=my - slope * mx, per_degree_kwh=slope, fit=sxy * sxy / (sxx * syy), days=n)
+    return Learned(rest_kwh=my - slope * mx, per_degree_kwh=slope, fit=sxy * sxy / (sxx * syy), days=n * span)
+
+
+def _together(used: dict[date, float], degree_days: dict[date, float], span: int) -> list[tuple[float, float]]:
+    """Each run of `span` days in a row with both a consumption and a cold, as one point: their mean cold, their mean
+    consumption. A day missing starts a new run: days far apart are never read together."""
+    points, run = [], []
+    for day in sorted(d for d in used if degree_days.get(d) is not None):
+        if run and (day - run[-1]).days != 1:
+            run = []
+        run.append(day)
+        if len(run) == span:
+            points.append((sum(degree_days[d] for d in run) / span, sum(used[d] for d in run) / span))
+            run = []
+    return points
 
 
 @dataclass(frozen=True)
@@ -82,6 +101,64 @@ def over(learned: Learned | None, degree_days: dict[date, float], first: date, l
     if bought_kwh and energy_eur is not None and bought_kwh > 0:
         eur = total * energy_eur / bought_kwh
     return Heat(total, eur, counted)
+
+
+# --- Gas: the same line, drawn through the gas burnt each day ------------------------------------------------------
+#
+# A home heated with gas has nothing to say from its electricity (« peu lié »), but its Energy page counts the gas.
+# `learn` takes the gas of each day instead of the electricity: what rises with the cold is the heating, what stays in
+# summer is the hot water and the cooking. The quantities keep the meter's own unit (kWh, or m³), never converted.
+
+# Gas is read three days together: a boiler's gas is often counted the day after it was burnt (a meter read late, a
+# house that keeps its heat), which blurs a line drawn day by day. On a real gas home (a year, about 300 days): the
+# same slope, and the cold explains 62 % of the differences instead of 47 %.
+GAS_SPAN = 3
+
+
+@dataclass(frozen=True)
+class Gas:
+    total: float               # all the gas burnt over the period, in the meter's unit
+    eur: float | None          # at the price given; None without one (never shown as free)
+    heat: float | None         # the heating in it; None when it is not estimated
+    heat_eur: float | None
+    days: int                  # days of the period with gas counted
+
+    def as_dict(self) -> dict:
+        return {"total": round(self.total, 1), "eur": None if self.eur is None else round(self.eur, 2),
+                "chauffage": None if self.heat is None else round(self.heat, 1),
+                "chauffage_eur": None if self.heat_eur is None else round(self.heat_eur, 2), "jours": self.days}
+
+
+# What the home burns a day without heating is read on its days without cold (under one degree-day), once two weeks
+# of them were seen: a summer. Before, it is the line's own level at no cold, a little low when the heating stays off
+# on the mild days of autumn (the line then leans down), so a little too much heating until the first summer.
+NO_COLD = 1.0
+MIN_WARM_DAYS = 14
+
+
+def without_heating(burnt: dict[date, float], degree_days: dict[date, float], learned: Learned | None) -> float | None:
+    """The gas of a day without heating (the hot water, the cooking), in the meter's unit. None when the gas does not
+    follow the cold: nothing then tells a heating from the rest."""
+    if learned is None or not learned.reliable:
+        return None
+    warm = [gas for day, gas in burnt.items() if (cold := degree_days.get(day)) is not None and cold <= NO_COLD]
+    return sum(warm) / len(warm) if len(warm) >= MIN_WARM_DAYS else max(0.0, learned.rest_kwh)
+
+
+def gas_over(burnt: dict[date, float], rest: float | None, first: date, last: date, price: float | None = None) -> Gas | None:
+    """The gas of the days from `first` to `last` (included): all of it, and the heating in it when `rest` is known
+    (`without_heating`) — what was burnt beyond `rest` each day. None when no day of the period is known.
+
+    The gas is measured, so the heating is what is left of it, not what the cold alone would give (`over`, for the
+    electricity, where nothing else tells the radiators from the rest): on a real gas home, a mild autumn's cold gave
+    more heating than all the gas burnt, and a month with the boiler off must show none."""
+    days = [d for d in burnt if first <= d <= last]
+    if not days:
+        return None
+    total = sum(burnt[d] for d in days)
+    heat = None if rest is None else min(total, max(0.0, total - rest * len(days)))
+    return Gas(total, None if price is None else total * price, heat,
+               None if heat is None or price is None else heat * price, len(days))
 
 
 # --- The pellet stove (9.1), read from Suivi Stock Pellet ---------------------------------------------------------

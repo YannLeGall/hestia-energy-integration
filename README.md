@@ -128,7 +128,7 @@ Hestia Énergie conseille. Elle n’allume, n’éteint et ne règle rien.
 Pas encore vérifié sur une vraie maison :
 
 - **Tempo** : les couleurs et leurs prix sont comptés, mais aucune maison en Tempo n’a encore servi d’essai.
-- **Gaz, bois, fioul** : pas encore comptés. Le poêle à granulés l’est, avec Suivi Stock Pellet.
+- **Bois, fioul** : pas encore comptés. Le poêle à granulés l’est, avec Suivi Stock Pellet ; le gaz aussi, quand son compteur est dans la page Énergie (carte Chauffage).
 - **Pompe à chaleur** : sa consommation est comptée avec le reste de l’électricité, mais aucune maison équipée n’a encore servi d’essai.
 
 À savoir aussi :
